@@ -1,3 +1,5 @@
+use std::f32::INFINITY;
+
 use glfw::{Action, Context, Key};
 
 mod glsetup;
@@ -7,8 +9,8 @@ mod penstate;
 use penstate::{PenState, PenType};
 
 struct MousePos {
-    x: i16, 
-    y: i16,
+    x: i32, 
+    y: i32,
     clicked: bool,
     button: glfw::MouseButton
 }
@@ -25,8 +27,10 @@ impl TextureData {
     }
 
     fn draw(&mut self, mouse: &MousePos, pen: &PenState, width: i32, height: i32, value: u8) {
+        let adjusted_m_y = (mouse.y - (height / 2)).max(0);
+
         let m_x_dist = (mouse.x as f32 / width as f32).clamp(0.0, 1.0);
-        let m_y_dist = (mouse.y as f32 / height as f32).clamp(0.0, 1.0);
+        let m_y_dist = (adjusted_m_y as f32 / (height / 2) as f32).clamp(0.0, 1.0);
 
         let d_x = (m_x_dist * 200.0) as i32;
         let d_y = (m_y_dist * 200.0) as i32;
@@ -39,7 +43,6 @@ impl TextureData {
             let d_index = d_center + o.x as i32 + (o.y as i32 * 200);
             self.data[d_index.clamp(0, max as i32) as usize] = value;
         }
-            
     }
 }
 
@@ -51,8 +54,8 @@ impl MousePos {
     }
     fn update_pos(&mut self, window: &mut glfw::Window) {
         let (xpos, ypos) = window.get_cursor_pos();
-        self.x = xpos as i16;
-        self.y = ypos as i16;
+        self.x = xpos as i32;
+        self.y = ypos as i32;
     }
 }
 
@@ -63,11 +66,11 @@ fn main() {
 
     let mut glfw = glfw::init(glfw::fail_on_errors).unwrap();
 
-    let (mut window, events) = glfw.create_window(800, 600, "Hello this is window", glfw::WindowMode::Windowed)
+    let (mut window, events) = glfw.create_window(400, 800, "Hello this is window", glfw::WindowMode::Windowed)
         .expect("Failed to create GLFW window.");
 
-    let mut width = 800;
-    let mut height = 600;
+    let mut width = 400;
+    let mut height = 800;
 
     window.set_key_polling(true);
     window.set_framebuffer_size_polling(true);
