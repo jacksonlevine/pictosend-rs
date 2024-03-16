@@ -1,5 +1,3 @@
-use std::f32::INFINITY;
-
 use glfw::{Action, Context, Key};
 
 mod glsetup;
@@ -9,7 +7,9 @@ mod penstate;
 use penstate::{PenState, PenType};
 
 mod fixtures;
+use fixtures::{Fixture, Fixtures};
 
+mod textureface;
 struct MousePos {
     x: i32, 
     y: i32,
@@ -64,12 +64,14 @@ impl MousePos {
 fn main() {
     
     let mut mouse = MousePos::new();
-    let mut penstate = PenState::new(PenType::ThinPen);
+    let penstate = PenState::new(PenType::ThinPen);
 
     let mut glfw = glfw::init(glfw::fail_on_errors).unwrap();
 
     let (mut window, events) = glfw.create_window(400, 800, "PictoSend RS", glfw::WindowMode::Windowed)
         .expect("Failed to create GLFW window.");
+    
+    gl::load_with(|s| window.get_proc_address(s) as *const _);
 
     let mut width = 400;
     let mut height = 800;
@@ -81,6 +83,16 @@ fn main() {
 
     let mut gl_setup = GlSetup::new(&mut window);
     let mut draw_pixels = TextureData::new(200, 200);
+    let mut fixtures = Fixtures::new().unwrap();
+
+    fixtures.set_fixtures(vec![
+        Fixture {x:-1.0, y: -1.0, width: 0.2, height: 0.1, tooltip: String::from("Clear Drawing"), texx: 6, texy: 0},
+        Fixture {x:-0.8, y: -1.0, width: 0.2, height: 0.1, tooltip: String::from("Brightnesss Down"), texx: 5, texy: 0},
+        Fixture {x:-0.6, y: -1.0, width: 0.2, height: 0.1, tooltip: String::from("Brightnesss Up"), texx: 4, texy: 0},
+        Fixture {x:-0.4, y: -1.0, width: 0.2, height: 0.1, tooltip: String::from("Toggle Camera"), texx: 3, texy: 0},
+        Fixture {x:-0.2, y: -1.0, width: 0.2, height: 0.1, tooltip: String::from("Send Drawing"), texx: 1, texy: 0},
+        Fixture {x:0.8, y: 0.0, width: 0.2, height: 0.1, tooltip: String::from("Scroll To Present"), texx: 7, texy: 0},
+    ]);
 
     while !window.should_close() {
         glfw.poll_events();
@@ -91,6 +103,7 @@ fn main() {
             gl::ClearColor(0.0, 0.0, 0.0, 1.0);
             gl_setup.update_texture(&draw_pixels.data);
             gl_setup.draw();
+            fixtures.draw(gl_setup.menu_shader);
         }
         
         for (_, event) in glfw::flush_messages(&events) {
@@ -107,7 +120,6 @@ fn main() {
                 glfw::WindowEvent::FramebufferSize(wid, hei) => {
                     width = wid;
                     height = hei;
-                    println!("New vp: {width}, {height}");
                     unsafe {
                         gl::Viewport(0, 0, wid, hei);
                     }
@@ -126,7 +138,6 @@ fn main() {
                 },
                 _ => ()
             }
-            
         }
 
         window.swap_buffers();

@@ -15,7 +15,6 @@ pub struct GlSetup {
 
 impl GlSetup {
     pub fn new(window: &mut glfw::Window) -> GlSetup {
-        gl::load_with(|s| window.get_proc_address(s) as *const _);
         let vertex_shader = compile_shader("assets/vert.glsl", gl::VERTEX_SHADER);
         let fragment_shader = compile_shader("assets/frag.glsl", gl::FRAGMENT_SHADER);
         let draw_shader = link_shader_program(vertex_shader, fragment_shader);
