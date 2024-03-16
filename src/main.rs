@@ -18,13 +18,13 @@ struct MousePos {
 }
 
 struct TextureData {
-    data: Vec<u8>
+    data: [u8; 200 * 200],
 }
 
 impl TextureData {
-    fn new(width: i32, height: i32) -> Self {
+    fn new() -> Self {
         TextureData {
-            data: vec![0; (width * height) as usize]
+            data: [0; 200 * 200]
         }
     }
 
@@ -82,16 +82,22 @@ fn main() {
     window.make_current();
 
     let mut gl_setup = GlSetup::new();
-    let mut draw_pixels = TextureData::new(200, 200);
+    let mut draw_pixels = TextureData::new();
     let mut fixtures = Fixtures::new().unwrap();
 
+    fn test_func() {
+        println!("Test!");
+    }
+
+
+
     fixtures.set_fixtures(vec![
-        Fixture {x:-1.0, y: -1.0, width: 0.2, height: 0.1, tooltip: String::from("Clear Drawing"), texx: 6, texy: 0},
-        Fixture {x:-0.8, y: -1.0, width: 0.2, height: 0.1, tooltip: String::from("Brightnesss Down"), texx: 5, texy: 0},
-        Fixture {x:-0.6, y: -1.0, width: 0.2, height: 0.1, tooltip: String::from("Brightnesss Up"), texx: 4, texy: 0},
-        Fixture {x:-0.4, y: -1.0, width: 0.2, height: 0.1, tooltip: String::from("Toggle Camera"), texx: 3, texy: 0},
-        Fixture {x:-0.2, y: -1.0, width: 0.2, height: 0.1, tooltip: String::from("Send Drawing"), texx: 1, texy: 0},
-        Fixture {x:0.8, y: 0.0, width: 0.2, height: 0.1, tooltip: String::from("Scroll To Present"), texx: 7, texy: 0},
+        Fixture {x:-1.0, y: -1.0, width: 0.2, height: 0.1, tooltip: String::from("Clear Drawing"), texx: 6, texy: 0, func: test_func},
+        Fixture {x:-0.8, y: -1.0, width: 0.2, height: 0.1, tooltip: String::from("Brightnesss Down"), texx: 5, texy: 0, func: test_func},
+        Fixture {x:-0.6, y: -1.0, width: 0.2, height: 0.1, tooltip: String::from("Brightnesss Up"), texx: 4, texy: 0, func: test_func},
+        Fixture {x:-0.4, y: -1.0, width: 0.2, height: 0.1, tooltip: String::from("Toggle Camera"), texx: 3, texy: 0, func: test_func},
+        Fixture {x:-0.2, y: -1.0, width: 0.2, height: 0.1, tooltip: String::from("Send Drawing"), texx: 1, texy: 0, func: test_func},
+        Fixture {x:0.8, y: 0.0, width: 0.2, height: 0.1, tooltip: String::from("Scroll To Present"), texx: 7, texy: 0, func: test_func},
     ]);
 
     while !window.should_close() {
@@ -122,6 +128,9 @@ fn main() {
                     mouse.clicked = action == Action::Press;
                     mouse.button = mousebutton;
                     if action == Action::Release {
+                        if(fixtures.clicked_on_id != 0.0) {
+                            (fixtures.fixtures[(fixtures.clicked_on_id - 1.0) as usize].func)();
+                        }
                         fixtures.clicked_on_id = 0.0;
                     } else if action == Action::Press {
                         fixtures.clicked_on_id = fixtures.moused_over_id;

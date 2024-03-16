@@ -1,6 +1,9 @@
 use image::GenericImageView;
 use crate::textureface::TextureFace;
 use crate::MousePos;
+
+type FixtureFunc = fn() -> ();
+
 pub struct Fixture {
     pub x: f32,
     pub y: f32,
@@ -8,7 +11,8 @@ pub struct Fixture {
     pub height: f32,
     pub tooltip: String,
     pub texx: i8,
-    pub texy: i8
+    pub texy: i8,
+    pub func: FixtureFunc
 }
 
 pub struct Fixtures {
