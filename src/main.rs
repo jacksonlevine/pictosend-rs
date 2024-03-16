@@ -8,6 +8,8 @@ use glsetup::GlSetup;
 mod penstate;
 use penstate::{PenState, PenType};
 
+mod fixtures;
+
 struct MousePos {
     x: i32, 
     y: i32,
@@ -66,7 +68,7 @@ fn main() {
 
     let mut glfw = glfw::init(glfw::fail_on_errors).unwrap();
 
-    let (mut window, events) = glfw.create_window(400, 800, "Hello this is window", glfw::WindowMode::Windowed)
+    let (mut window, events) = glfw.create_window(400, 800, "PictoSend RS", glfw::WindowMode::Windowed)
         .expect("Failed to create GLFW window.");
 
     let mut width = 400;

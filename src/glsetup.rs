@@ -5,7 +5,9 @@ use std::ptr;
 use std::str;
 
 pub struct GlSetup {
-    pub shader: gl::types::GLuint,
+    pub draw_shader: gl::types::GLuint,
+    pub menu_shader: gl::types::GLuint,
+    pub scroll_shader: gl::types::GLuint,
     pub vao: gl::types::GLuint,
     pub vbo: gl::types::GLuint,
     pub texture: gl::types::GLuint
@@ -16,7 +18,25 @@ impl GlSetup {
         gl::load_with(|s| window.get_proc_address(s) as *const _);
         let vertex_shader = compile_shader("assets/vert.glsl", gl::VERTEX_SHADER);
         let fragment_shader = compile_shader("assets/frag.glsl", gl::FRAGMENT_SHADER);
-        let shader = link_shader_program(vertex_shader, fragment_shader);
+        let draw_shader = link_shader_program(vertex_shader, fragment_shader);
+
+        unsafe {
+            gl::DeleteShader(vertex_shader);
+            gl::DeleteShader(fragment_shader);
+        }
+
+        let vertex_shader = compile_shader("assets/menuVert.glsl", gl::VERTEX_SHADER);
+        let fragment_shader = compile_shader("assets/menuFrag.glsl", gl::FRAGMENT_SHADER);
+        let menu_shader = link_shader_program(vertex_shader, fragment_shader);
+
+        unsafe {
+            gl::DeleteShader(vertex_shader);
+            gl::DeleteShader(fragment_shader);
+        }
+
+        let vertex_shader = compile_shader("assets/scrollVert.glsl", gl::VERTEX_SHADER);
+        let fragment_shader = compile_shader("assets/frag.glsl", gl::FRAGMENT_SHADER);
+        let scroll_shader = link_shader_program(vertex_shader, fragment_shader);
 
         unsafe {
             gl::DeleteShader(vertex_shader);
@@ -63,7 +83,7 @@ impl GlSetup {
         }
 
         unsafe {
-            let pos_attrib = gl::GetAttribLocation(shader, b"pos\0".as_ptr() as *const gl::types::GLchar);
+            let pos_attrib = gl::GetAttribLocation(draw_shader, b"pos\0".as_ptr() as *const gl::types::GLchar);
             gl::EnableVertexAttribArray(pos_attrib as gl::types::GLuint);
             gl::VertexAttribPointer(
                 pos_attrib as gl::types::GLuint,
@@ -74,7 +94,7 @@ impl GlSetup {
                 std::ptr::null()
             );
         
-            let tex_attrib = gl::GetAttribLocation(shader, b"texcoord\0".as_ptr() as *const gl::types::GLchar);
+            let tex_attrib = gl::GetAttribLocation(draw_shader, b"texcoord\0".as_ptr() as *const gl::types::GLchar);
             gl::EnableVertexAttribArray(tex_attrib as gl::types::GLuint);
             gl::VertexAttribPointer(
                 tex_attrib as gl::types::GLuint,
@@ -87,7 +107,9 @@ impl GlSetup {
         }
 
         GlSetup {
-            shader,
+            draw_shader,
+            menu_shader,
+            scroll_shader,
             vao,
             vbo,
             texture: tex,
@@ -98,7 +120,7 @@ impl GlSetup {
         unsafe {
             gl::BindVertexArray(self.vao);
             gl::BindTexture(gl::TEXTURE_2D, self.texture);
-            gl::UseProgram(self.shader);
+            gl::UseProgram(self.draw_shader);
             gl::DrawArrays(gl::TRIANGLES, 0, 6);
         }
     }
