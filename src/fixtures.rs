@@ -11,14 +11,6 @@ pub struct Fixture {
     pub texy: i8
 }
 
-impl Fixture {
-    pub fn new(x: f32, y: f32, width: f32, height: f32, tooltip: String, texx: i8, texy: i8) -> Fixture {
-        Fixture {
-            x, y, width, height, tooltip, texx, texy
-        }
-    }
-}
-
 pub struct Fixtures {
     pub fixtures: Vec<Fixture>,
     pub dirty: bool,

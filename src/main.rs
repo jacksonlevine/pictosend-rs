@@ -81,7 +81,7 @@ fn main() {
     window.set_mouse_button_polling(true);
     window.make_current();
 
-    let mut gl_setup = GlSetup::new(&mut window);
+    let mut gl_setup = GlSetup::new();
     let mut draw_pixels = TextureData::new(200, 200);
     let mut fixtures = Fixtures::new().unwrap();
 
