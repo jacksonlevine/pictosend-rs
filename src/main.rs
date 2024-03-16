@@ -105,6 +105,13 @@ fn main() {
             gl_setup.draw();
             fixtures.draw(gl_setup.menu_shader);
         }
+        fixtures.get_moused_over(&mouse, width, height);
+        unsafe {
+            let moe_location = gl::GetUniformLocation(gl_setup.menu_shader, b"mousedOverElement\0".as_ptr() as *const i8);
+            gl::Uniform1f(moe_location, fixtures.moused_over_id);
+            let coe_location = gl::GetUniformLocation(gl_setup.menu_shader, b"clickedOnElement\0".as_ptr() as *const i8);
+            gl::Uniform1f(coe_location, fixtures.clicked_on_id); 
+        }
         
         for (_, event) in glfw::flush_messages(&events) {
             match event {
@@ -112,10 +119,13 @@ fn main() {
                     window.set_should_close(true)
                 },
                 glfw::WindowEvent::MouseButton(mousebutton, action, _) => {
-                    if let Action::Press | Action::Release = action {
-                        mouse.clicked = action == Action::Press;
-                    }
+                    mouse.clicked = action == Action::Press;
                     mouse.button = mousebutton;
+                    if action == Action::Release {
+                        fixtures.clicked_on_id = 0.0;
+                    } else if action == Action::Press {
+                        fixtures.clicked_on_id = fixtures.moused_over_id;
+                    }
                 },
                 glfw::WindowEvent::FramebufferSize(wid, hei) => {
                     width = wid;
@@ -131,7 +141,9 @@ fn main() {
         if mouse.clicked {
             match mouse.button {
                 glfw::MouseButtonLeft => {
-                    draw_pixels.draw(&mouse, &penstate, width, height, 254);
+                    if fixtures.moused_over_id == 0.0 {
+                        draw_pixels.draw(&mouse, &penstate, width, height, 254);
+                    }
                 },
                 glfw::MouseButtonRight => {
                     draw_pixels.draw(&mouse, &penstate, width, height, 0);

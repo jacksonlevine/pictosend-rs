@@ -1,6 +1,6 @@
 use image::GenericImageView;
 use crate::textureface::TextureFace;
-
+use crate::MousePos;
 pub struct Fixture {
     pub x: f32,
     pub y: f32,
@@ -25,10 +25,31 @@ pub struct Fixtures {
     pub vbo: gl::types::GLuint,
     pub vao: gl::types::GLuint,
     pub data: Vec<f32>,
-    pub texture: gl::types::GLuint
+    pub texture: gl::types::GLuint,
+    pub moused_over_id: f32,
+    pub clicked_on_id: f32,
 }
 
 impl Fixtures {
+    pub fn get_moused_over(&mut self, mouse: &MousePos, windowwidth: i32, windowheight: i32) {
+        for (index, fix) in self.fixtures.iter().enumerate() {
+            let spx: f32 = (fix.x + 1.0) * 0.5;
+            let spy: f32 = (1.0 - (fix.y+fix.height)) * 0.5;
+            let sw: f32 = fix.width/2.0;
+            let sh: f32 = fix.height/2.0;
+            let id: f32 = (index + 1) as f32;
+
+            if  (mouse.x as f32) > spx * windowwidth as f32 &&
+                (mouse.x as f32) < (spx + sw) * windowwidth as f32 &&
+                (mouse.y as f32) > spy * windowheight as f32 &&
+                (mouse.y as f32) < (spy + sh) * windowheight as f32
+            {
+                self.moused_over_id = id;
+                return ();
+            }
+        }
+        self.moused_over_id = 0.0;
+    }
     pub fn new() -> Result<Fixtures, String> {
         let mut vao: gl::types::GLuint = 0;
         unsafe {
@@ -70,7 +91,9 @@ impl Fixtures {
                 vbo: 0,
                 vao,
                 data: Vec::new(),
-                texture
+                texture,
+                moused_over_id: 0.0,
+                clicked_on_id: 0.0
             }
         )
     }
