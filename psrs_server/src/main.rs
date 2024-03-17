@@ -1,3 +1,4 @@
+use std::char::MAX;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::collections::HashMap;
@@ -10,6 +11,7 @@ use std::io::{BufReader, BufWriter};
 use std::path::Path;
 
 const PACKET_SIZE: usize = 40055;
+const MAX_HISTORY: usize = 56;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct TextureData {
@@ -98,6 +100,9 @@ fn handle_client(client_id: usize, clients: Arc<Mutex<HashMap<usize, Client>>>, 
                             // Add the message to history
                             let mut history_locked = history.lock().unwrap();
                             (*history_locked).history.push(texture_data);
+                            if (*history_locked).history.len() > MAX_HISTORY {
+                                (*history_locked).history.remove(0);
+                            }
                             (*history_locked).history.sort_by_key(|item| item.timestamp);
                             println!("History len is now {}", (*history_locked).history.len());
                             // Serialize and save (overwrite) to file
@@ -161,15 +166,12 @@ fn main() {
         println!("File does not exist, initializing new data.");
     }
 
-    let mut next_client_id = 0;
-
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
                 println!("New connection: {}", stream.peer_addr().unwrap());
-                let client_id = next_client_id;
-                next_client_id += 1;
                 let mut locked_clients = clients.lock().unwrap();
+                let client_id = locked_clients.len();
                 locked_clients.insert(
                     client_id,
                     Client {

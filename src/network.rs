@@ -9,6 +9,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use crate::winflash::flash_window;
 
 pub const PACKET_SIZE: usize = 40055;
+const MAX_HISTORY: usize = 56;
 
 #[derive(Clone, Debug)]
 pub struct Connection {
@@ -34,7 +35,9 @@ impl Connection {
             Ok(_) => {
                 let received_texture_data: TextureData = bincode::deserialize(&buffer).unwrap();
                 history.lock().unwrap().history.push(received_texture_data);
-                
+                if history.lock().unwrap().history.len() > MAX_HISTORY {
+                    history.lock().unwrap().history.remove(0);
+                }
                 history.lock().unwrap().history.sort_by_key(|item| item.timestamp);
                 history.lock().unwrap().dirty = true;
                 flash_window(self.window_handle);
