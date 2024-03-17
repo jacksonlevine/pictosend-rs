@@ -10,6 +10,13 @@ mod fixtures;
 use fixtures::{Fixture, Fixtures};
 
 mod textureface;
+
+mod network;
+use network::Connection;
+
+use std::io::{Read, Write};
+use std::net::{Shutdown};
+use std::sync::{Arc, Mutex};
 struct MousePos {
     x: i32, 
     y: i32,
@@ -17,6 +24,7 @@ struct MousePos {
     button: glfw::MouseButton
 }
 
+#[derive(Clone, Debug)]
 struct TextureData {
     data: [u8; 200 * 200],
 }
@@ -82,22 +90,34 @@ fn main() {
     window.make_current();
 
     let mut gl_setup = GlSetup::new();
-    let mut draw_pixels = TextureData::new();
+    let mut draw_pixels = Arc::new(Mutex::new(TextureData::new()));
     let mut fixtures = Fixtures::new().unwrap();
 
-    fn test_func() {
+    let mut connection = Arc::new(Mutex::new(Connection::new()));
+
+    let test_func = Box::new(|| {
         println!("Test!");
-    }
+    });
 
 
+    let send_func: Box<dyn Fn()> = {
+        let connection = Arc::clone(&connection);
+        let draw_pixels = Arc::clone(&draw_pixels);
+        Box::new(move || {
+            let mut connection = connection.lock().unwrap();
+            let draw_pixels = draw_pixels.lock().unwrap();
+            connection.send(&draw_pixels);
+            println!("Sending");
+        })
+    };
 
     fixtures.set_fixtures(vec![
-        Fixture {x:-1.0, y: -1.0, width: 0.2, height: 0.1, tooltip: String::from("Clear Drawing"), texx: 6, texy: 0, func: test_func},
-        Fixture {x:-0.8, y: -1.0, width: 0.2, height: 0.1, tooltip: String::from("Brightnesss Down"), texx: 5, texy: 0, func: test_func},
-        Fixture {x:-0.6, y: -1.0, width: 0.2, height: 0.1, tooltip: String::from("Brightnesss Up"), texx: 4, texy: 0, func: test_func},
-        Fixture {x:-0.4, y: -1.0, width: 0.2, height: 0.1, tooltip: String::from("Toggle Camera"), texx: 3, texy: 0, func: test_func},
-        Fixture {x:-0.2, y: -1.0, width: 0.2, height: 0.1, tooltip: String::from("Send Drawing"), texx: 1, texy: 0, func: test_func},
-        Fixture {x:0.8, y: 0.0, width: 0.2, height: 0.1, tooltip: String::from("Scroll To Present"), texx: 7, texy: 0, func: test_func},
+        Fixture {x:-1.0, y: -1.0, width: 0.2, height: 0.1, tooltip: String::from("Clear Drawing"), texx: 6, texy: 0, func: test_func.clone()},
+        Fixture {x:-0.8, y: -1.0, width: 0.2, height: 0.1, tooltip: String::from("Brightnesss Down"), texx: 5, texy: 0, func: test_func.clone()},
+        Fixture {x:-0.6, y: -1.0, width: 0.2, height: 0.1, tooltip: String::from("Brightnesss Up"), texx: 4, texy: 0, func: test_func.clone()},
+        Fixture {x:-0.4, y: -1.0, width: 0.2, height: 0.1, tooltip: String::from("Toggle Camera"), texx: 3, texy: 0, func: test_func.clone()},
+        Fixture {x:-0.2, y: -1.0, width: 0.2, height: 0.1, tooltip: String::from("Send Drawing"), texx: 1, texy: 0, func: send_func},
+        Fixture {x:0.8, y: 0.0, width: 0.2, height: 0.1, tooltip: String::from("Scroll To Present"), texx: 7, texy: 0, func: test_func.clone()},
     ]);
 
     while !window.should_close() {
@@ -107,7 +127,7 @@ fn main() {
         unsafe {
             gl::Clear(gl::COLOR_BUFFER_BIT);
             gl::ClearColor(0.0, 0.0, 0.0, 1.0);
-            gl_setup.update_texture(&draw_pixels.data);
+            gl_setup.update_texture(&draw_pixels.lock().unwrap().data);
             gl_setup.draw();
             fixtures.draw(gl_setup.menu_shader);
         }
@@ -118,6 +138,8 @@ fn main() {
             let coe_location = gl::GetUniformLocation(gl_setup.menu_shader, b"clickedOnElement\0".as_ptr() as *const i8);
             gl::Uniform1f(coe_location, fixtures.clicked_on_id); 
         }
+
+        connection.lock().unwrap().receive();
         
         for (_, event) in glfw::flush_messages(&events) {
             match event {
@@ -151,11 +173,11 @@ fn main() {
             match mouse.button {
                 glfw::MouseButtonLeft => {
                     if fixtures.moused_over_id == 0.0 {
-                        draw_pixels.draw(&mouse, &penstate, width, height, 254);
+                        draw_pixels.lock().unwrap().draw(&mouse, &penstate, width, height, 254);
                     }
                 },
                 glfw::MouseButtonRight => {
-                    draw_pixels.draw(&mouse, &penstate, width, height, 0);
+                    draw_pixels.lock().unwrap().draw(&mouse, &penstate, width, height, 0);
                 },
                 _ => ()
             }
@@ -163,4 +185,5 @@ fn main() {
 
         window.swap_buffers();
     }
+    connection.lock().unwrap().stream.lock().unwrap().shutdown(Shutdown::Both).unwrap();
 }

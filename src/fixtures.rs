@@ -2,7 +2,7 @@ use image::GenericImageView;
 use crate::textureface::TextureFace;
 use crate::MousePos;
 
-type FixtureFunc = fn() -> ();
+type FixtureFunc = Box<dyn Fn()>;
 
 pub struct Fixture {
     pub x: f32,
