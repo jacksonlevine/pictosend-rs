@@ -151,7 +151,7 @@ fn main() {
     let mut fixtures = Fixtures::new().unwrap();
 
     let serialized_size = serialized_size(&(*(draw_pixels.lock().unwrap()))).unwrap();
-    println!("Serialized size of TextureData: {} bytes", serialized_size);
+    //println!("Serialized size of TextureData: {} bytes", serialized_size);
 
     let history = Arc::new(Mutex::new(ChatHistory::new()));
 
