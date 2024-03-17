@@ -23,6 +23,7 @@ use std::io::{Read, Write};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 mod history;
+mod glyphface;
 struct MousePos {
     x: i32, 
     y: i32,
@@ -147,6 +148,14 @@ fn main() {
         })
     };
 
+    let clear_func: Box<dyn Fn()> = {
+        let draw_pixels = Arc::clone(&draw_pixels);
+        Box::new(move || {
+            let mut draw_pixels = draw_pixels.lock().unwrap();
+            (*draw_pixels).data.fill(0);
+        })
+    };
+
     let jump_to_present_func: Box<dyn Fn()> = {
         let history = Arc::clone(&history);
         Box::new(move || {
@@ -156,7 +165,7 @@ fn main() {
     };
 
     fixtures.set_fixtures(vec![
-        Fixture {x:-1.0, y: -1.0, width: 0.2, height: 0.1, tooltip: String::from("Clear Drawing"), texx: 6, texy: 0, func: test_func.clone()},
+        Fixture {x:-1.0, y: -1.0, width: 0.2, height: 0.1, tooltip: String::from("Clear Drawing"), texx: 6, texy: 0, func: clear_func},
         Fixture {x:-0.8, y: -1.0, width: 0.2, height: 0.1, tooltip: String::from("Brightnesss Down"), texx: 5, texy: 0, func: test_func.clone()},
         Fixture {x:-0.6, y: -1.0, width: 0.2, height: 0.1, tooltip: String::from("Brightnesss Up"), texx: 4, texy: 0, func: test_func.clone()},
         Fixture {x:-0.4, y: -1.0, width: 0.2, height: 0.1, tooltip: String::from("Toggle Camera"), texx: 3, texy: 0, func: test_func.clone()},
@@ -173,9 +182,11 @@ fn main() {
             gl::Clear(gl::COLOR_BUFFER_BIT);
             gl::ClearColor(0.0, 0.0, 0.0, 1.0);
             history.lock().unwrap().draw(width, height, gl_setup.scroll_shader, &myname);
+            history.lock().unwrap().draw_names(width, height, gl_setup.scroll_shader, fixtures.texture);
             gl_setup.update_texture(&draw_pixels.lock().unwrap().data);
             gl_setup.draw();
             fixtures.draw(gl_setup.menu_shader);
+            fixtures.draw_tooltip(&window, gl_setup.menu_shader);
         }
         fixtures.get_moused_over(&mouse, width, height);
         unsafe {

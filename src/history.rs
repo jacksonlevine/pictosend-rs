@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use bincode::serialized_size;
 
-use crate::TextureData;
+use crate::{glyphface::GlyphFace, TextureData};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ChatHistory {
@@ -11,7 +11,11 @@ pub struct ChatHistory {
     pub display_data: Vec<f32>,
     pub dirty: bool,
     pub scroll_offset: f32,
-    pub texture: gl::types::GLuint
+    pub texture: gl::types::GLuint,
+    pub name_starts: Vec<f32>,
+    pub name_geometry: Vec<f32>,
+    pub name_vbo: gl::types::GLuint,
+    pub name_dirty: bool
 }
 
 impl ChatHistory {
@@ -37,19 +41,23 @@ impl ChatHistory {
             display_data: Vec::new(),
             dirty: true,
             scroll_offset: 0.0,
-            texture
+            texture,
+            name_starts: Vec::new(),
+            name_geometry: Vec::new(),
+            name_vbo: 0,
+            name_dirty: false
         }
     }
 
-    fn bind_scroll_geometry(&self, upload: bool, shader: gl::types::GLuint) {
+    fn bind_scroll_geometry(&self, vbo: gl::types::GLuint, upload: bool, shader: gl::types::GLuint, data: &Vec<f32>) {
         unsafe {
             gl::BindVertexArray(self.vao);
-            gl::BindBuffer(gl::ARRAY_BUFFER, self.vbo);
+            gl::BindBuffer(gl::ARRAY_BUFFER, vbo);
             if upload  {
                 gl::BufferData(
                     gl::ARRAY_BUFFER,
-                    (self.display_data.len() * std::mem::size_of::<f32>()) as gl::types::GLsizeiptr,
-                    self.display_data.as_ptr() as *const gl::types::GLvoid,
+                    (data.len() * std::mem::size_of::<f32>()) as gl::types::GLsizeiptr,
+                    data.as_ptr() as *const gl::types::GLvoid,
                     gl::STATIC_DRAW
                 );
             }   
@@ -96,7 +104,9 @@ impl ChatHistory {
             gl::BindVertexArray(self.vao);
             gl::UseProgram(shader);
             if self.dirty {
+                self.name_dirty = true;
                 self.display_data.clear();
+                self.name_starts.clear();
                 gl::DeleteBuffers(1, &self.vbo);
                 gl::GenBuffers(1, &mut self.vbo);
 
@@ -104,22 +114,32 @@ impl ChatHistory {
                 let hei = 500.0 / windowheight as f32;
 
                 let space = 550.0 / windowheight as f32;
+
+                let bytes = myname.as_bytes();
+                let mut fixed_size_text = [0u8; 24];
+                fixed_size_text[..bytes.len()].copy_from_slice(bytes);
                 
                 for i in 0..self.history.len() {
                     for v in 0..6 {
                         let vstart = v*4;
                         self.display_data.extend_from_slice(&[
-                            QUAD_VERTICES[vstart+0] * wid,
+                            (if self.history[i].name == fixed_size_text { 0.3 } else { -0.3 } ) + QUAD_VERTICES[vstart+0] * wid,
                             (QUAD_VERTICES[vstart+1] * hei) + 0.8 + ((self.history.len() - 1 - i) as f32 * space),
                             QUAD_VERTICES[vstart+2], 
                             QUAD_VERTICES[vstart+3],
                         ]);
+                        if v == 0 {
+                            self.name_starts.extend_from_slice(&[
+                                (if self.history[i].name == fixed_size_text { 0.3 } else { -0.3 } ) + QUAD_VERTICES[vstart+0] * wid,
+                                (QUAD_VERTICES[vstart+1] * hei) + 0.8 + ((self.history.len() - 1 - i) as f32 * space),
+                            ]);
+                        }
                     }
                 }
                 self.dirty = false;
-                self.bind_scroll_geometry(true, shader);
+                self.bind_scroll_geometry(self.vbo, true, shader, &self.display_data);
             } else {
-                self.bind_scroll_geometry(false, shader);
+                self.bind_scroll_geometry(self.vbo, false, shader, &self.display_data);
             }
 
             let scroll_location = gl::GetUniformLocation(shader, b"scroll\0".as_ptr() as *const i8);
@@ -142,5 +162,65 @@ impl ChatHistory {
                 gl::DrawArrays(gl::TRIANGLES, bs as i32, 6);
             }
         }
+    }
+
+    pub fn draw_names(&mut self, windowwidth: i32, windowheight: i32, shader: gl::types::GLuint, texture: gl::types::GLuint) {
+        let gwidth: f32 = 32.0/windowwidth as f32;
+        let gheight: f32 = 32.0/windowheight as f32;
+
+        static mut vbo: gl::types::GLuint = 0;
+        unsafe {
+            gl::BindVertexArray(self.vao);
+            gl::UseProgram(shader);
+        }
+        if self.name_dirty {
+            self.name_geometry.clear();
+            unsafe {
+                gl::DeleteBuffers(1, &vbo);
+                gl::GenBuffers(1, &mut vbo);
+            }
+            for i in 0..self.history.len() {
+                let name = self.history[i].name;
+                let mut letters_count = 0;
+
+                for n in 0..24 {
+                    if name[n] == 0 {
+                        break;
+                    }
+                    letters_count += 1;
+                }
+
+                let nbs = i * 2;
+                let namex = self.name_starts[nbs+0];
+                let namey = self.name_starts[nbs+1] - gheight;
+
+                let mut g = GlyphFace::new(0);
+                for l in 0..letters_count {
+                    g.set_char(name[l]);
+                    self.name_geometry.extend_from_slice(&[
+                        l as f32 * gwidth + namex,          namey,            g.blx,g.bly,
+                        l as f32 * gwidth + namex,          namey + gheight,  g.tlx,g.tly,
+                        l as f32 * gwidth + namex + gwidth, namey + gheight,  g.trx, g.tr_y,
+
+                        l as f32 * gwidth + namex + gwidth, namey + gheight,  g.trx, g.tr_y,
+                        l as f32 * gwidth + namex + gwidth, namey,            g.brx, g.bry,
+                        l as f32 * gwidth + namex,          namey,            g.blx,g.bly,
+                    ]);
+                }
+            }
+            unsafe {
+                self.bind_scroll_geometry(vbo, true, shader, &self.name_geometry);
+            }
+        } else {
+            unsafe {
+                self.bind_scroll_geometry(vbo, false, shader, &self.name_geometry);
+            }
+        }
+
+        unsafe {
+            gl::BindTexture(gl::TEXTURE_2D, texture);
+            gl::DrawArrays(gl::TRIANGLES, 0, (self.name_geometry.len()/4) as i32);
+        }
+            
     }
 }

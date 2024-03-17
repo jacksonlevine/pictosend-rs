@@ -1,4 +1,6 @@
+use glfw::PWindow;
 use image::GenericImageView;
+use crate::glyphface::GlyphFace;
 use crate::textureface::TextureFace;
 use crate::MousePos;
 
@@ -116,15 +118,15 @@ impl Fixtures {
         self.data = data;
     }
 
-    fn bind_geometry(&self, upload: bool, shader: gl::types::GLuint) {
+    fn bind_geometry(&self, vbo: gl::types::GLuint, upload: bool, shader: gl::types::GLuint, data: &Vec<f32>) {
 
         unsafe {
-            gl::BindBuffer(gl::ARRAY_BUFFER, self.vbo);
+            gl::BindBuffer(gl::ARRAY_BUFFER, vbo);
             if upload {
                 gl::BufferData(
                     gl::ARRAY_BUFFER, 
-                    (self.data.len() * std::mem::size_of::<f32>()) as gl::types::GLsizeiptr, 
-                    self.data.as_ptr() as *const gl::types::GLvoid,
+                    (data.len() * std::mem::size_of::<f32>()) as gl::types::GLsizeiptr, 
+                    data.as_ptr() as *const gl::types::GLvoid,
                     gl::STATIC_DRAW);
             }
             let pos_attrib = gl::GetAttribLocation(
@@ -175,14 +177,64 @@ impl Fixtures {
                     gl::DeleteBuffers(1, &self.vbo);
                     gl::GenBuffers(1, &mut self.vbo);
                     self.rebuild_geometry();
-                    self.bind_geometry(true, shader);
+                    self.bind_geometry(self.vbo, true, shader, &self.data);
                 self.dirty = false;
             } else {
-                self.bind_geometry(false, shader);
+                self.bind_geometry(self.vbo, false, shader, &self.data);
             }
             gl::BindTexture(gl::TEXTURE_2D, self.texture);
             gl::UseProgram(shader);
             gl::DrawArrays(gl::TRIANGLES, 0, (self.fixtures.len() * 6) as i32);
         }
+    }
+
+    pub fn draw_tooltip(&mut self, window: &PWindow, menu_shader: gl::types::GLuint) {
+        static mut VBO: gl::types::GLuint = 0;
+        let (xpos, ypos) = window.get_cursor_pos();
+        let (window_width, window_height) = window.get_size();
+
+        let normalized_x = xpos / window_width as f64;
+        let normalized_y = 1.0 - (ypos / window_height as f64);
+
+        let mut mousex = (normalized_x * 2.0 - 1.0) as f32;
+        let mousey = (normalized_y * 2.0 - 1.0) as f32;
+
+        let gwidth = 32.0/window_width as f32;
+        let gheight = 32.0/window_height as f32;
+
+        if(self.moused_over_id != 0.0) {
+            let fix = &(self.fixtures[(self.moused_over_id - 1.0) as usize]);
+            let tooltip = &(fix.tooltip);
+            let letters_count = tooltip.len();
+            let letters_width = letters_count as f32 * gwidth;
+
+            if mousex > 0.0 {
+                mousex -= letters_width as f32;
+            }
+
+            let mut letters_geometry: Vec<f32> = Vec::new();
+            let mut g = GlyphFace::new(0);
+
+            for i in 0..letters_count {
+                g.set_char(tooltip.as_bytes()[i]);
+                
+                letters_geometry.extend_from_slice(&[
+                    i as f32 * gwidth + mousex,          mousey,            g.blx, g.bly,  -1.0,
+                    i as f32 * gwidth + mousex,          mousey + gheight,  g.tlx, g.tly,  -1.0,
+                    i as f32 * gwidth + mousex + gwidth, mousey + gheight,  g.trx, g.tr_y, -1.0,
+
+                    i as f32 * gwidth + mousex + gwidth, mousey + gheight,  g.trx, g.tr_y, -1.0,
+                    i as f32 * gwidth + mousex + gwidth, mousey,            g.brx, g.bry,  -1.0,
+                    i as f32 * gwidth + mousex,          mousey,            g.blx, g.bly,  -1.0,
+                ]);
+            }
+            unsafe {
+                gl::DeleteBuffers(1, &VBO);
+                gl::GenBuffers(1, &mut VBO);
+                self.bind_geometry(VBO, true, menu_shader, &letters_geometry);
+                gl::DrawArrays(gl::TRIANGLES, 0, (letters_count*6) as i32);
+            }
+        }
+        
     }
 }
