@@ -20,6 +20,7 @@ use std::sync::{Arc, Mutex};
 use serde::{Serialize, Deserialize};
 use bincode::serialized_size;
 use std::io::{Read, Write};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 mod history;
 struct MousePos {
@@ -36,7 +37,8 @@ struct TextureData {
     request_history: bool,
     request_history_length: bool,
     history_length: i32,
-    confirm_history: bool
+    confirm_history: bool,
+    timestamp: u128
 }
 
 impl TextureData {
@@ -44,6 +46,7 @@ impl TextureData {
         let bytes = myname.as_bytes();
         let mut fixed_size_text = [0u8; 24];
         fixed_size_text[..bytes.len()].copy_from_slice(bytes);
+        let now = SystemTime::now();
 
         TextureData {
             name: fixed_size_text,
@@ -51,7 +54,8 @@ impl TextureData {
             request_history: false,
             request_history_length: false,
             history_length: 0,
-            confirm_history: false
+            confirm_history: false,
+            timestamp: now.duration_since(UNIX_EPOCH).unwrap().as_millis()
         }
     }
 
@@ -135,6 +139,8 @@ fn main() {
         Box::new(move || {
             let mut connection = connection.lock().unwrap();
             let mut draw_pixels = draw_pixels.lock().unwrap();
+            let now = SystemTime::now();
+            draw_pixels.timestamp = now.duration_since(UNIX_EPOCH).unwrap().as_millis();
             connection.send(&draw_pixels);
             (*draw_pixels).data.fill(0);
             println!("Sending");

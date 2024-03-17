@@ -6,7 +6,7 @@ use std::thread;
 use serde::{Serialize, Deserialize};
 use bincode::serialized_size;
 
-const PACKET_SIZE: usize = 40039;
+const PACKET_SIZE: usize = 40055;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct TextureData {
@@ -15,7 +15,8 @@ struct TextureData {
     request_history: bool,
     request_history_length: bool,
     history_length: i32,
-    confirm_history: bool
+    confirm_history: bool,
+    timestamp: u128
 }
 
 struct Client {
@@ -47,7 +48,6 @@ fn handle_client(client_id: usize, clients: Arc<Mutex<HashMap<usize, Client>>>, 
                 clients[&client_id].stream.try_clone().expect("Failed to clone stream")
             };
 
-
                 match stream.read_exact(&mut buffer) {
 
                     Ok(_) => {
@@ -62,7 +62,8 @@ fn handle_client(client_id: usize, clients: Arc<Mutex<HashMap<usize, Client>>>, 
                                 request_history: false,
                                 request_history_length: false,
                                 history_length: bincode::serialized_size(&((*history_locked).history)).unwrap() as i32,
-                                confirm_history: false
+                                confirm_history: false,
+                                timestamp: 0
                             };
                             let serialized_data = bincode::serialize(&response).unwrap();
                             stream.write_all(&serialized_data).unwrap();
@@ -94,6 +95,7 @@ fn handle_client(client_id: usize, clients: Arc<Mutex<HashMap<usize, Client>>>, 
                             // Add the message to history
                             let mut history_locked = history.lock().unwrap();
                             (*history_locked).history.push(texture_data);
+                            (*history_locked).history.sort_by_key(|item| item.timestamp);
                             println!("History len is now {}", (*history_locked).history.len());
                             // Send updated texture data to all clients
                             let mut clients = clients.lock().unwrap();
