@@ -8,6 +8,7 @@ edition = "2021"
 
 [dependencies]
 bincode = "1.3.3"
+escapi = "4.0.0"
 gl = "0.14.0"
 glfw = "0.55.0"
 image = "0.25.0"

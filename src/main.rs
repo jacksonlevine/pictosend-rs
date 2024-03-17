@@ -20,7 +20,7 @@ use std::sync::{Arc, Mutex};
 use serde::{Serialize, Deserialize};
 use bincode::serialized_size;
 use std::io::{Read, Write};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH, Duration, Instant};
 
 mod history;
 mod glyphface;
@@ -96,7 +96,54 @@ impl MousePos {
     }
 }
 
+struct CameraStuff {
+    camera: Option<escapi::Device>,
+    camera_mode: bool,
+    brightness: i16
+}
+
+impl CameraStuff {
+    pub fn new() -> CameraStuff {
+        CameraStuff {
+            camera: None,
+            camera_mode: false,
+            brightness: 0
+        }
+    }
+
+    pub fn toggle(&mut self) {
+        if !self.camera_mode {
+            self.camera = Some(escapi::init(0, 200, 200, 15).expect("Failed to initialize camera"));
+            self.camera_mode = true;
+        } else {
+            self.camera = None;
+            self.camera_mode = false;
+        }
+    }
+}
+
+fn increase_contrast(image: &[u8], factor: f32) -> Vec<u8> {
+    let min_value = *image.iter().min().unwrap() as f32;
+    let max_value = *image.iter().max().unwrap() as f32;
+
+    image
+        .iter()
+        .map(|&pixel| {
+            let pixel = pixel as f32;
+            let stretched = 255.0 * (pixel - min_value) / (max_value - min_value);
+            let enhanced = 255.0 / (1.0 + ((255.0 - stretched) / stretched).powf(factor));
+            enhanced as u8
+        })
+        .collect()
+}
+
 fn main() {
+    let mut previous_time = Instant::now();
+    let mut delta_time: f32 = 0.0;
+    
+    let mut cam_timer: f32 = 0.0;
+
+    let cam = Arc::new(Mutex::new(CameraStuff::new()));
 
     let mut myname = String::new();
 
@@ -197,11 +244,40 @@ fn main() {
         })
     };
 
+    let cam_func: Box<dyn Fn()> = {
+        let cam = Arc::clone(&cam);
+        let draw_pixels = Arc::clone(&draw_pixels);
+        Box::new(move || {
+            let mut cam = cam.lock().unwrap();
+            let mut draw_pixels = draw_pixels.lock().unwrap();
+            cam.toggle();
+            if !cam.camera_mode {
+                (*draw_pixels).data.fill(0);
+            }
+        })
+    };
+
+    let brightdown_func: Box<dyn Fn()> = {
+        let cam = Arc::clone(&cam);
+        Box::new(move || {
+            let mut cam = cam.lock().unwrap();
+            cam.brightness -= 20;
+        })
+    };
+
+    let brightup_func: Box<dyn Fn()> = {
+        let cam = Arc::clone(&cam);
+        Box::new(move || {
+            let mut cam = cam.lock().unwrap();
+            cam.brightness += 20;
+        })
+    };
+
     fixtures.set_fixtures(vec![
         Fixture {x:-1.0, y: -1.0, width: 0.2, height: 0.1, tooltip: String::from("Clear Drawing"), texx: 6, texy: 0, func: clear_func},
-        Fixture {x:-0.8, y: -1.0, width: 0.2, height: 0.1, tooltip: String::from("Brightnesss Down"), texx: 5, texy: 0, func: test_func.clone()},
-        Fixture {x:-0.6, y: -1.0, width: 0.2, height: 0.1, tooltip: String::from("Brightnesss Up"), texx: 4, texy: 0, func: test_func.clone()},
-        Fixture {x:-0.4, y: -1.0, width: 0.2, height: 0.1, tooltip: String::from("Toggle Camera"), texx: 3, texy: 0, func: test_func.clone()},
+        Fixture {x:-0.8, y: -1.0, width: 0.2, height: 0.1, tooltip: String::from("Brightnesss Down"), texx: 5, texy: 0, func: brightdown_func},
+        Fixture {x:-0.6, y: -1.0, width: 0.2, height: 0.1, tooltip: String::from("Brightnesss Up"), texx: 4, texy: 0, func: brightup_func},
+        Fixture {x:-0.4, y: -1.0, width: 0.2, height: 0.1, tooltip: String::from("Toggle Camera"), texx: 3, texy: 0, func: cam_func},
         Fixture {x:-0.2, y: -1.0, width: 0.2, height: 0.1, tooltip: String::from("Send Drawing"), texx: 1, texy: 0, func: send_func},
         Fixture {x:0.8, y: 0.0, width: 0.2, height: 0.1, tooltip: String::from("Scroll To Present"), texx: 7, texy: 0, func: jump_to_present_func},
     ]);
@@ -210,6 +286,10 @@ fn main() {
     while !window.should_close() {
         glfw.poll_events();
         mouse.update_pos(&mut window);
+
+        let current_time = Instant::now();
+        delta_time = current_time.duration_since(previous_time).as_secs_f32();
+        previous_time = current_time;
 
         unsafe {
             gl::Clear(gl::COLOR_BUFFER_BIT);
@@ -229,6 +309,27 @@ fn main() {
             gl::Uniform1f(coe_location, fixtures.clicked_on_id); 
         }
 
+        let lock_cam = cam.lock().unwrap();
+        if lock_cam.camera_mode {
+            if cam_timer > 0.5 {
+                let frame = lock_cam.camera.as_ref().unwrap().capture().expect("Failed to cap frame");
+
+                let extracted_data: Vec<u8> = frame
+                    .chunks(4) // Group the data into chunks of 4 bytes (RGBA)
+                    .map(|chunk| (255 as i32 - (chunk[0] as i32 + lock_cam.brightness as i32) as i32).clamp(0, 255) as u8) // Take the first byte from each chunk
+                    .collect();
+
+                let contrast_frame = increase_contrast(&extracted_data, 5.0);
+
+                draw_pixels.lock().unwrap().data.clone_from_slice(&contrast_frame);
+                
+                cam_timer = 0.0;
+            } else {
+                cam_timer += delta_time;
+            }
+        }
+        drop(lock_cam);
+            
         if !gotHistoryLength || !gotHistory {
 
             let locked_conn = connection.lock().unwrap();
