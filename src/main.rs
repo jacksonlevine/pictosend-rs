@@ -4,6 +4,7 @@ mod glsetup;
 use glsetup::GlSetup;
 
 mod penstate;
+use history::ChatHistory;
 use penstate::{PenState, PenType};
 
 mod fixtures;
@@ -14,9 +15,13 @@ mod textureface;
 mod network;
 use network::Connection;
 
-use std::io::{Read, Write};
-use std::net::{Shutdown};
+use std::net::Shutdown;
 use std::sync::{Arc, Mutex};
+use serde::{Serialize, Deserialize};
+use bincode::serialized_size;
+use std::io::{Read, Write};
+
+mod history;
 struct MousePos {
     x: i32, 
     y: i32,
@@ -24,15 +29,29 @@ struct MousePos {
     button: glfw::MouseButton
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 struct TextureData {
-    data: [u8; 200 * 200],
+    name: [u8; 24],
+    data: Vec<u8>,
+    request_history: bool,
+    request_history_length: bool,
+    history_length: i32,
+    confirm_history: bool
 }
 
 impl TextureData {
-    fn new() -> Self {
+    fn new(myname: &String) -> Self {
+        let bytes = myname.as_bytes();
+        let mut fixed_size_text = [0u8; 24];
+        fixed_size_text[..bytes.len()].copy_from_slice(bytes);
+
         TextureData {
-            data: [0; 200 * 200]
+            name: fixed_size_text,
+            data: [0; 200 * 200].to_vec(),
+            request_history: false,
+            request_history_length: false,
+            history_length: 0,
+            confirm_history: false
         }
     }
 
@@ -70,6 +89,10 @@ impl MousePos {
 }
 
 fn main() {
+
+    let myname = String::from("Test name");
+    let mut gotHistoryLength = false;
+    let mut gotHistory = false;
     
     let mut mouse = MousePos::new();
     let penstate = PenState::new(PenType::ThinPen);
@@ -87,13 +110,19 @@ fn main() {
     window.set_key_polling(true);
     window.set_framebuffer_size_polling(true);
     window.set_mouse_button_polling(true);
+    window.set_scroll_polling(true);
     window.make_current();
 
     let mut gl_setup = GlSetup::new();
-    let mut draw_pixels = Arc::new(Mutex::new(TextureData::new()));
+    let draw_pixels = Arc::new(Mutex::new(TextureData::new(&myname)));
     let mut fixtures = Fixtures::new().unwrap();
 
-    let mut connection = Arc::new(Mutex::new(Connection::new()));
+    let serialized_size = serialized_size(&(*(draw_pixels.lock().unwrap()))).unwrap();
+    println!("Serialized size of TextureData: {} bytes", serialized_size);
+
+    let history = Arc::new(Mutex::new(ChatHistory::new()));
+
+    let connection = Arc::new(Mutex::new(Connection::new()));
 
     let test_func = Box::new(|| {
         println!("Test!");
@@ -105,9 +134,18 @@ fn main() {
         let draw_pixels = Arc::clone(&draw_pixels);
         Box::new(move || {
             let mut connection = connection.lock().unwrap();
-            let draw_pixels = draw_pixels.lock().unwrap();
+            let mut draw_pixels = draw_pixels.lock().unwrap();
             connection.send(&draw_pixels);
+            (*draw_pixels).data.fill(0);
             println!("Sending");
+        })
+    };
+
+    let jump_to_present_func: Box<dyn Fn()> = {
+        let history = Arc::clone(&history);
+        Box::new(move || {
+            let mut history = history.lock().unwrap();
+            history.scroll_offset = 0.0;
         })
     };
 
@@ -117,8 +155,9 @@ fn main() {
         Fixture {x:-0.6, y: -1.0, width: 0.2, height: 0.1, tooltip: String::from("Brightnesss Up"), texx: 4, texy: 0, func: test_func.clone()},
         Fixture {x:-0.4, y: -1.0, width: 0.2, height: 0.1, tooltip: String::from("Toggle Camera"), texx: 3, texy: 0, func: test_func.clone()},
         Fixture {x:-0.2, y: -1.0, width: 0.2, height: 0.1, tooltip: String::from("Send Drawing"), texx: 1, texy: 0, func: send_func},
-        Fixture {x:0.8, y: 0.0, width: 0.2, height: 0.1, tooltip: String::from("Scroll To Present"), texx: 7, texy: 0, func: test_func.clone()},
+        Fixture {x:0.8, y: 0.0, width: 0.2, height: 0.1, tooltip: String::from("Scroll To Present"), texx: 7, texy: 0, func: jump_to_present_func},
     ]);
+
 
     while !window.should_close() {
         glfw.poll_events();
@@ -127,6 +166,7 @@ fn main() {
         unsafe {
             gl::Clear(gl::COLOR_BUFFER_BIT);
             gl::ClearColor(0.0, 0.0, 0.0, 1.0);
+            history.lock().unwrap().draw(width, height, gl_setup.scroll_shader, &myname);
             gl_setup.update_texture(&draw_pixels.lock().unwrap().data);
             gl_setup.draw();
             fixtures.draw(gl_setup.menu_shader);
@@ -139,8 +179,65 @@ fn main() {
             gl::Uniform1f(coe_location, fixtures.clicked_on_id); 
         }
 
-        connection.lock().unwrap().receive();
-        
+        if !gotHistoryLength || !gotHistory {
+
+            let mut locked_conn = connection.lock().unwrap();
+
+            let mut cloned_stream = {
+                let locked_stream = locked_conn.stream.lock().unwrap();
+                locked_stream.try_clone().unwrap() // Clone the TcpStream
+            };
+            drop(locked_conn); // Explicitly drop the lock
+
+            cloned_stream.set_nonblocking(false).unwrap();
+            
+            let mut locked_conn = connection.lock().unwrap();
+            (*locked_conn).request_history_length(&myname, &mut cloned_stream);
+            drop(locked_conn);
+
+            let mut buffer = [0; crate::network::PACKET_SIZE];
+
+            match (cloned_stream).read_exact(&mut buffer) {
+                Ok(_) => {
+                    let received_data: TextureData = bincode::deserialize(&buffer).unwrap();
+                    let history_size = received_data.history_length;
+                    gotHistoryLength = true;
+
+                    let mut locked_conn = connection.lock().unwrap();
+                    (*locked_conn).request_history(&myname, &mut cloned_stream);
+                    drop(locked_conn);
+
+                    let mut history_buffer = vec![0; history_size as usize];
+
+                    match (cloned_stream).read_exact(&mut history_buffer) {
+                        Ok(_) => {
+                            let history_vec: Vec<TextureData> = bincode::deserialize(&history_buffer).unwrap();
+                            gotHistory = true;
+                            let mut his = history.lock().unwrap();
+                            his.history = history_vec;
+                            his.dirty = true;
+                            
+                            let mut locked_conn = connection.lock().unwrap();
+                            (*locked_conn).confirm_history(&myname, &mut cloned_stream);
+                            drop(locked_conn);
+                        }
+                        Err(e) => {
+                            println!("Failed to read from server: {}", e);
+                        }
+                    }
+                }
+                Err(e) => {
+                    println!("Failed to read from server: {}", e);
+                }
+            }
+
+            (cloned_stream).set_nonblocking(true).unwrap();
+
+
+        } else {
+            connection.lock().unwrap().receive(&history);
+        }
+
         for (_, event) in glfw::flush_messages(&events) {
             match event {
                 glfw::WindowEvent::Key(Key::Escape, _, Action::Press, _) => {
@@ -150,7 +247,7 @@ fn main() {
                     mouse.clicked = action == Action::Press;
                     mouse.button = mousebutton;
                     if action == Action::Release {
-                        if(fixtures.clicked_on_id != 0.0) {
+                        if fixtures.clicked_on_id != 0.0 {
                             (fixtures.fixtures[(fixtures.clicked_on_id - 1.0) as usize].func)();
                         }
                         fixtures.clicked_on_id = 0.0;
@@ -163,6 +260,16 @@ fn main() {
                     height = hei;
                     unsafe {
                         gl::Viewport(0, 0, wid, hei);
+                    }
+                },
+                glfw::WindowEvent::Scroll(_, yoff) => {
+                    if yoff > 0.0 {
+                        history.lock().unwrap().scroll_offset -= 0.075;
+                    }
+                    if yoff < 0.0 {
+                        if history.lock().unwrap().scroll_offset < 0.0 {
+                            history.lock().unwrap().scroll_offset += 0.075;
+                        }
                     }
                 }
                 _ => {}

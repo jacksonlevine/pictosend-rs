@@ -3,14 +3,13 @@ use std::net::TcpStream;
 use std::sync::{Arc, Mutex};
 
 use crate::TextureData;
+use crate::history::ChatHistory;
 
-const WIDTH: usize = 200;
-const HEIGHT: usize = 200;
+pub const PACKET_SIZE: usize = 40039;
 
 #[derive(Clone, Debug)]
 pub struct Connection {
-    pub stream: Arc<Mutex<TcpStream>>,
-    pub history: Vec<TextureData>
+    pub stream: Arc<Mutex<TcpStream>>
 }
 
 impl Connection {
@@ -19,18 +18,18 @@ impl Connection {
         stream.set_nonblocking(true).unwrap();
 
         Connection {
-            stream: Arc::new(Mutex::new(stream)),
-            history: Vec::new()
+            stream: Arc::new(Mutex::new(stream))
         }
     }
 
-    pub fn receive(&mut self) {
-        let mut buffer = [0; WIDTH * HEIGHT];
+    pub fn receive(&mut self, history: &Arc<Mutex<ChatHistory>>) {
+        let mut buffer = [0; PACKET_SIZE];
         let mut stream = self.stream.lock().unwrap();
-        match stream.read(&mut buffer) {
+        match stream.read_exact(&mut buffer) {
             Ok(_) => {
-                let received_texture_data = TextureData { data: buffer };
-                self.history.push(received_texture_data);
+                let received_texture_data: TextureData = bincode::deserialize(&buffer).unwrap();
+                history.lock().unwrap().history.push(received_texture_data);
+                history.lock().unwrap().dirty = true;
                 println!("Received drawing from server");
             }
             Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
@@ -44,6 +43,55 @@ impl Connection {
 
     pub fn send(&mut self, texture_data: &TextureData) {
         let mut stream = self.stream.lock().unwrap();
-        stream.write_all(&texture_data.data).unwrap();
+        let serialized_data = bincode::serialize(&texture_data).unwrap();
+        stream.write_all(&serialized_data).unwrap();
+    }
+    pub fn confirm_history(&mut self, myname: &String, stream: &mut TcpStream) {
+        let bytes = myname.as_bytes();
+        let mut fixed_size_text = [0u8; 24];
+        fixed_size_text[..bytes.len()].copy_from_slice(bytes);
+
+        let texture_data = TextureData {
+            name: fixed_size_text,
+            data: vec![0; 200*200],
+            request_history: false,
+            request_history_length: false,
+            history_length: 0,
+            confirm_history: true
+        };
+        let serialized_data = bincode::serialize(&texture_data).unwrap();
+        stream.write_all(&serialized_data).unwrap();
+    }
+    pub fn request_history(&mut self, myname: &String, stream: &mut TcpStream) {
+        let bytes = myname.as_bytes();
+        let mut fixed_size_text = [0u8; 24];
+        fixed_size_text[..bytes.len()].copy_from_slice(bytes);
+
+        let texture_data = TextureData {
+            name: fixed_size_text,
+            data: vec![0; 200*200],
+            request_history: true,
+            request_history_length: false,
+            history_length: 0,
+            confirm_history: false
+        };
+        let serialized_data = bincode::serialize(&texture_data).unwrap();
+        stream.write_all(&serialized_data).unwrap();
+    }
+    pub fn request_history_length(&mut self, myname: &String, stream: &mut TcpStream) {
+        let bytes = myname.as_bytes();
+        let mut fixed_size_text = [0u8; 24];
+        fixed_size_text[..bytes.len()].copy_from_slice(bytes);
+
+        let texture_data = TextureData {
+            name: fixed_size_text,
+            data: vec![0; 200*200],
+            request_history: false,
+            request_history_length: true,
+            history_length: 0,
+            confirm_history: false
+        };
+        let serialized_data = bincode::serialize(&texture_data).unwrap();
+        stream.write_all(&serialized_data).unwrap();
     }
 }

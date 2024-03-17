@@ -3,22 +3,40 @@ use std::net::{TcpListener, TcpStream};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::thread;
+use serde::{Serialize, Deserialize};
+use bincode::serialized_size;
 
-const WIDTH: usize = 200;
-const HEIGHT: usize = 200;
+const PACKET_SIZE: usize = 40039;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 struct TextureData {
-    data: [u8; WIDTH * HEIGHT],
+    name: [u8; 24],
+    data: Vec<u8>,
+    request_history: bool,
+    request_history_length: bool,
+    history_length: i32,
+    confirm_history: bool
 }
 
 struct Client {
-    id: usize,
     stream: TcpStream,
+    has_history: bool
 }
 
-fn handle_client(client_id: usize, clients: Arc<Mutex<HashMap<usize, Client>>>) {
-    let mut buffer = [0; WIDTH * HEIGHT];
+struct History {
+    history: Vec<TextureData>
+}
+
+impl History {
+    pub fn new() -> History {
+        History {
+            history: Vec::new()
+        }
+    }
+}
+
+fn handle_client(client_id: usize, clients: Arc<Mutex<HashMap<usize, Client>>>, history: Arc<Mutex<History>>) {
+    let mut buffer = [0; PACKET_SIZE];
 
     loop {
         let mut should_break = false;
@@ -30,26 +48,74 @@ fn handle_client(client_id: usize, clients: Arc<Mutex<HashMap<usize, Client>>>) 
             };
 
 
-                match stream.read(&mut buffer) {
-                    Ok(0) => {
-                        // The client has closed the connection
-                        println!(
-                            "Client disconnected: {}",
-                            stream.peer_addr().unwrap()
-                        );
-                        should_break = true;
-                    }
+                match stream.read_exact(&mut buffer) {
+
                     Ok(_) => {
                         println!("Got something from client {}", client_id);
-                        let texture_data = TextureData { data: buffer };
+                        let texture_data: TextureData = bincode::deserialize(&buffer).unwrap();
 
-                        // Send updated texture data to all clients
-                        let mut clients = clients.lock().unwrap();
-                        for client in clients.values_mut() {
-                            let _ = client.stream.write(&texture_data.data);
+                        if texture_data.request_history_length {
+                            let history_locked = history.lock().unwrap();
+                            let response = TextureData {
+                                name: [0u8; 24],
+                                data: vec![0u8; 200*200],
+                                request_history: false,
+                                request_history_length: false,
+                                history_length: bincode::serialized_size(&((*history_locked).history)).unwrap() as i32,
+                                confirm_history: false
+                            };
+                            let serialized_data = bincode::serialize(&response).unwrap();
+                            stream.write_all(&serialized_data).unwrap();
+                            match stream.read_exact(&mut buffer) {
+                                Ok(_) => {
+                                    let history_req: TextureData = bincode::deserialize(&buffer).unwrap();
+                                    if history_req.request_history {
+                                        let history_data = bincode::serialize(&((*history_locked).history)).unwrap();
+                                        stream.write_all(&history_data).unwrap();
+                                        match stream.read_exact(&mut buffer) {
+                                            Ok(_) => {
+                                                let confirm: TextureData = bincode::deserialize(&buffer).unwrap();
+                                                if confirm.confirm_history {
+                                                    let mut clients = clients.lock().unwrap();
+                                                    clients.get_mut(&client_id).unwrap().has_history = true;
+                                                }
+                                            },
+                                            Err(e) => {
+            
+                                            }
+                                        }
+                                    }
+                                },
+                                Err(e) => {
+
+                                }
+                            }
+                        } else {
+                            // Add the message to history
+                            let mut history_locked = history.lock().unwrap();
+                            (*history_locked).history.push(texture_data);
+                            println!("History len is now {}", (*history_locked).history.len());
+                            // Send updated texture data to all clients
+                            let mut clients = clients.lock().unwrap();
+                            for client in clients.values_mut() {
+                                if(client.has_history) {
+                                    let _ = client.stream.write_all(&buffer);
+                                }
+                            }
+                        }
+                        
+                    }
+                    Err(e) => {
+                        if e.kind() == std::io::ErrorKind::UnexpectedEof {
+                            println!(
+                                "Client disconnected: {}",
+                                stream.peer_addr().unwrap()
+                            );
+                            should_break = true;
+                        } else {
+                            println!("Failed to receive from client: {}", e);
                         }
                     }
-                    Err(e) => println!("Failed to read from client: {}", e),
                 }
 
         }
@@ -67,6 +133,8 @@ fn handle_client(client_id: usize, clients: Arc<Mutex<HashMap<usize, Client>>>) 
 fn main() {
     let listener = TcpListener::bind("127.0.0.1:7878").unwrap();
     let clients = Arc::new(Mutex::new(HashMap::new()));
+    let history = Arc::new(Mutex::new(History::new()));
+
     let mut next_client_id = 0;
 
     for stream in listener.incoming() {
@@ -79,15 +147,16 @@ fn main() {
                 locked_clients.insert(
                     client_id,
                     Client {
-                        id: client_id,
                         stream: stream.try_clone().unwrap(),
+                        has_history: false
                     },
                 );
                 println!("Clients len is now {}", locked_clients.len());
                 drop(locked_clients);
                 let clients_ref_clone = Arc::clone(&clients);
+                let history_ref_clone = Arc::clone(&history);
                 thread::spawn(move || {
-                    handle_client(client_id, clients_ref_clone);
+                    handle_client(client_id, clients_ref_clone, history_ref_clone);
                 });
             }
             Err(e) => {
