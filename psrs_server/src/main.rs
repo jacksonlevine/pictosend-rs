@@ -5,6 +5,9 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use serde::{Serialize, Deserialize};
 use bincode::serialized_size;
+use std::fs::{File, OpenOptions};
+use std::io::{BufReader, BufWriter};
+use std::path::Path;
 
 const PACKET_SIZE: usize = 40055;
 
@@ -61,7 +64,7 @@ fn handle_client(client_id: usize, clients: Arc<Mutex<HashMap<usize, Client>>>, 
                                 data: vec![0u8; 200*200],
                                 request_history: false,
                                 request_history_length: false,
-                                history_length: bincode::serialized_size(&((*history_locked).history)).unwrap() as i32,
+                                history_length: serialized_size(&((*history_locked).history)).unwrap() as i32,
                                 confirm_history: false,
                                 timestamp: 0
                             };
@@ -97,6 +100,16 @@ fn handle_client(client_id: usize, clients: Arc<Mutex<HashMap<usize, Client>>>, 
                             (*history_locked).history.push(texture_data);
                             (*history_locked).history.sort_by_key(|item| item.timestamp);
                             println!("History len is now {}", (*history_locked).history.len());
+                            // Serialize and save (overwrite) to file
+                            let file = OpenOptions::new()
+                                .write(true)
+                                .create(true)
+                                .truncate(true)
+                                .open("history")
+                                .unwrap();
+                            let writer = BufWriter::new(file);
+                            bincode::serialize_into(writer, &(*history_locked).history).unwrap();
+
                             // Send updated texture data to all clients
                             let mut clients = clients.lock().unwrap();
                             for client in clients.values_mut() {
@@ -136,6 +149,17 @@ fn main() {
     let listener = TcpListener::bind("127.0.0.1:7878").unwrap();
     let clients = Arc::new(Mutex::new(HashMap::new()));
     let history = Arc::new(Mutex::new(History::new()));
+
+    let save_path = "history";
+
+    if Path::new(save_path).exists() {
+        let file = File::open(save_path).unwrap();
+        let reader = BufReader::new(file);
+        history.lock().unwrap().history = bincode::deserialize_from(reader).unwrap();
+        println!("Loaded data.");
+    } else {
+        println!("File does not exist, initializing new data.");
+    }
 
     let mut next_client_id = 0;
 
