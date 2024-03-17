@@ -639,6 +639,7 @@ dependencies = [
  "image",
  "regex",
  "serde",
+ "winapi",
 ]
 
 [[package]]

@@ -25,6 +25,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 mod history;
 mod glyphface;
 use std::io;
+
+mod winflash;
 struct MousePos {
     x: i32, 
     y: i32,
@@ -134,6 +136,8 @@ fn main() {
 
     let (mut window, events) = glfw.create_window(400, 800, "PictoSend RS", glfw::WindowMode::Windowed)
         .expect("Failed to create GLFW window.");
+
+    let window_handle = window.get_win32_window() as winapi::shared::windef::HWND;
     
     gl::load_with(|s| window.get_proc_address(s) as *const _);
 
@@ -144,6 +148,7 @@ fn main() {
     window.set_framebuffer_size_polling(true);
     window.set_mouse_button_polling(true);
     window.set_scroll_polling(true);
+    window.set_focus_polling(true);
     window.make_current();
 
     let mut gl_setup = GlSetup::new();
@@ -155,7 +160,7 @@ fn main() {
 
     let history = Arc::new(Mutex::new(ChatHistory::new()));
 
-    let connection = Arc::new(Mutex::new(Connection::new(&serverip)));
+    let connection = Arc::new(Mutex::new(Connection::new(&serverip, &window_handle)));
 
     let test_func = Box::new(|| {
         println!("Test!");
@@ -315,6 +320,11 @@ fn main() {
                         if history.lock().unwrap().scroll_offset < 0.0 {
                             history.lock().unwrap().scroll_offset += 0.075;
                         }
+                    }
+                },
+                glfw::WindowEvent::Focus(foc) => {
+                    if foc {
+                        history.lock().unwrap().dirty = true;
                     }
                 }
                 _ => {}

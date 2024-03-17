@@ -6,20 +6,24 @@ use crate::TextureData;
 use crate::history::ChatHistory;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::winflash::flash_window;
+
 pub const PACKET_SIZE: usize = 40055;
 
 #[derive(Clone, Debug)]
 pub struct Connection {
-    pub stream: Arc<Mutex<TcpStream>>
+    pub stream: Arc<Mutex<TcpStream>>,
+    pub window_handle: winapi::shared::windef::HWND
 }
 
 impl Connection {
-    pub fn new(address: &String) -> Connection {
+    pub fn new(address: &String, window_handle: &winapi::shared::windef::HWND) -> Connection {
         let stream = TcpStream::connect(address).unwrap();
         stream.set_nonblocking(true).unwrap();
 
         Connection {
-            stream: Arc::new(Mutex::new(stream))
+            stream: Arc::new(Mutex::new(stream)),
+            window_handle: window_handle.clone()
         }
     }
 
@@ -30,8 +34,10 @@ impl Connection {
             Ok(_) => {
                 let received_texture_data: TextureData = bincode::deserialize(&buffer).unwrap();
                 history.lock().unwrap().history.push(received_texture_data);
+                
                 history.lock().unwrap().history.sort_by_key(|item| item.timestamp);
                 history.lock().unwrap().dirty = true;
+                flash_window(self.window_handle);
                 println!("Received drawing from server");
             }
             Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
