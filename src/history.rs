@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
-use bincode::serialized_size;
-
+use regex::Regex;
 use crate::{glyphface::GlyphFace, TextureData};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -181,14 +180,15 @@ impl ChatHistory {
             }
             for i in 0..self.history.len() {
                 let name = self.history[i].name;
-                let mut letters_count = 0;
 
-                for n in 0..24 {
-                    if name[n] == 0 {
-                        break;
-                    }
-                    letters_count += 1;
-                }
+                let mut namestring = String::from_utf8(name.to_vec()).unwrap();
+
+                // Create a regex that matches only printable ASCII characters
+                let re = Regex::new(r"[ -~]").unwrap();
+                // Filter the string to only include characters that match the regex
+                namestring = namestring.chars().filter(|c| re.is_match(&c.to_string())).collect();
+
+                let letters_count = namestring.chars().count();
 
                 let nbs = i * 2;
                 let namex = self.name_starts[nbs+0];
@@ -211,6 +211,7 @@ impl ChatHistory {
             unsafe {
                 self.bind_scroll_geometry(vbo, true, shader, &self.name_geometry);
             }
+            self.name_dirty = false;
         } else {
             unsafe {
                 self.bind_scroll_geometry(vbo, false, shader, &self.name_geometry);

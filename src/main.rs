@@ -24,6 +24,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 mod history;
 mod glyphface;
+use std::io;
 struct MousePos {
     x: i32, 
     y: i32,
@@ -95,7 +96,34 @@ impl MousePos {
 
 fn main() {
 
-    let myname = String::from("Test name");
+    let mut myname = String::new();
+
+    println!("What would you like your name to be?");
+    loop {
+        io::stdin()
+                .read_line(&mut myname)
+                .expect("Failed to read line");
+
+        if myname.len() > 24 {
+            println!("Name cannot be longer than 24 characters. Please type a shorter name.");
+        } else if myname.len() < 2 {
+            println!("Name cannot be shorter than 2 characters. Please type a longer name.");
+        } else {
+            break;
+        }
+    }
+
+    let mut serverip = String::new();
+    println!("Please type the server IP in the format address:port");
+    loop {
+        io::stdin()
+                .read_line(&mut serverip)
+                .expect("Failed to read line");
+        println!("Trying to connect to {serverip}");
+        serverip = serverip.trim().to_string();
+        break;
+    }
+
     let mut gotHistoryLength = false;
     let mut gotHistory = false;
     
@@ -127,7 +155,7 @@ fn main() {
 
     let history = Arc::new(Mutex::new(ChatHistory::new()));
 
-    let connection = Arc::new(Mutex::new(Connection::new()));
+    let connection = Arc::new(Mutex::new(Connection::new(&serverip)));
 
     let test_func = Box::new(|| {
         println!("Test!");
@@ -198,7 +226,7 @@ fn main() {
 
         if !gotHistoryLength || !gotHistory {
 
-            let mut locked_conn = connection.lock().unwrap();
+            let locked_conn = connection.lock().unwrap();
 
             let mut cloned_stream = {
                 let locked_stream = locked_conn.stream.lock().unwrap();

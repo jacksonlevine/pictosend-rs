@@ -146,7 +146,7 @@ fn handle_client(client_id: usize, clients: Arc<Mutex<HashMap<usize, Client>>>, 
 }
 
 fn main() {
-    let listener = TcpListener::bind("127.0.0.1:7878").unwrap();
+    let listener = TcpListener::bind("0.0.0.0:6969").unwrap();
     let clients = Arc::new(Mutex::new(HashMap::new()));
     let history = Arc::new(Mutex::new(History::new()));
 

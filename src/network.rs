@@ -14,8 +14,8 @@ pub struct Connection {
 }
 
 impl Connection {
-    pub fn new() -> Connection {
-        let stream = TcpStream::connect("127.0.0.1:7878").unwrap();
+    pub fn new(address: &String) -> Connection {
+        let stream = TcpStream::connect(address).unwrap();
         stream.set_nonblocking(true).unwrap();
 
         Connection {
