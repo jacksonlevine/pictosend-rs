@@ -87,7 +87,8 @@ impl ChatHistory {
         }
     }
 
-    pub fn draw(&mut self, windowwidth: i32, windowheight: i32, shader: gl::types::GLuint, myname: &String) {
+    pub fn draw(&mut self, windowwidth: i32, windowheight: i32, shader: gl::types::GLuint, myname: &String) -> bool {
+        let mut return_value = false;
         static QUAD_VERTICES: [f32; 24] = [
             // positions    // texture coords
             -1.0,  -1.0,  0.0, 1.0,
@@ -103,6 +104,7 @@ impl ChatHistory {
             gl::BindVertexArray(self.vao);
             gl::UseProgram(shader);
             if self.dirty {
+                return_value = true;
                 self.name_dirty = true;
                 self.display_data.clear();
                 self.name_starts.clear();
@@ -161,6 +163,7 @@ impl ChatHistory {
                 gl::DrawArrays(gl::TRIANGLES, bs as i32, 6);
             }
         }
+        return return_value;
     }
 
     pub fn draw_names(&mut self, windowwidth: i32, windowheight: i32, shader: gl::types::GLuint, texture: gl::types::GLuint) {

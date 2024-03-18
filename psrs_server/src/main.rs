@@ -9,6 +9,7 @@ use bincode::serialized_size;
 use std::fs::{File, OpenOptions};
 use std::io::{BufReader, BufWriter};
 use std::path::Path;
+use uuid::Uuid;
 
 const PACKET_SIZE: usize = 40055;
 const MAX_HISTORY: usize = 56;
@@ -42,9 +43,9 @@ impl History {
     }
 }
 
-fn handle_client(client_id: usize, clients: Arc<Mutex<HashMap<usize, Client>>>, history: Arc<Mutex<History>>) {
+fn handle_client(client_id: Uuid, clients: Arc<Mutex<HashMap<Uuid, Client>>>, history: Arc<Mutex<History>>) {
     let mut buffer = [0; PACKET_SIZE];
-
+    let mut cliname = String::new();
     loop {
         let mut should_break = false;
         {
@@ -53,12 +54,16 @@ fn handle_client(client_id: usize, clients: Arc<Mutex<HashMap<usize, Client>>>, 
                 let clients = clients.lock().unwrap();
                 clients[&client_id].stream.try_clone().expect("Failed to clone stream")
             };
-
+            
                 match stream.read_exact(&mut buffer) {
 
                     Ok(_) => {
-                        println!("Got something from client {}", client_id);
+                        
                         let texture_data: TextureData = bincode::deserialize(&buffer).unwrap();
+                        let name = String::from_utf8(texture_data.name.to_vec()).unwrap();
+                        cliname = name.clone();
+
+                        println!("Got something from client {}", name);
 
                         if texture_data.request_history_length {
                             let history_locked = history.lock().unwrap();
@@ -130,7 +135,7 @@ fn handle_client(client_id: usize, clients: Arc<Mutex<HashMap<usize, Client>>>, 
                         if e.kind() == std::io::ErrorKind::UnexpectedEof {
                             println!(
                                 "Client disconnected: {}",
-                                stream.peer_addr().unwrap()
+                                cliname
                             );
                             should_break = true;
                         } else {
@@ -178,7 +183,7 @@ fn main() {
             Ok(stream) => {
                 println!("New connection: {}", stream.peer_addr().unwrap());
                 let mut locked_clients = clients.lock().unwrap();
-                let client_id = locked_clients.len();
+                let client_id = Uuid::new_v4();
                 locked_clients.insert(
                     client_id,
                     Client {

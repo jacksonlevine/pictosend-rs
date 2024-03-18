@@ -13,20 +13,26 @@ use fixtures::{Fixture, Fixtures};
 mod textureface;
 
 mod network;
-use network::Connection;
+use network::*;
 
-use std::net::Shutdown;
+use std::net::{Shutdown, TcpStream};
 use std::sync::{Arc, Mutex};
+use std::thread::JoinHandle;
 use serde::{Serialize, Deserialize};
 use bincode::serialized_size;
 use std::io::{Read, Write};
 use std::time::{SystemTime, UNIX_EPOCH, Duration, Instant};
+use crate::typer::Typer;
+use crate::winflash::flash_window;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use lerp::Lerp;
 
 mod history;
 mod glyphface;
 use std::io;
+
+mod typer;
 
 mod winflash;
 struct MousePos {
@@ -202,6 +208,8 @@ fn main() {
 
     let mut gotHistoryLength = false;
     let mut gotHistory = false;
+
+    let should_close = Arc::new(AtomicBool::new(false));
     
     let mut mouse = MousePos::new();
     let penstate = Arc::new(Mutex::new(PenState::new(PenType::ThinPen)));
@@ -229,6 +237,7 @@ fn main() {
     let draw_pixels = Arc::new(Mutex::new(TextureData::new(&myname)));
     let cam_pixels: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(vec![0u8; 200*200]));
     let mut fixtures = Arc::new(Mutex::new(Fixtures::new().unwrap()));
+    let mut typer = Arc::new(Mutex::new(Typer::new()));
 
     let mut fixtureswapqueue: Arc<Mutex<Vec<FixtureSwap>>> = Arc::new(Mutex::new(Vec::new()));
 
@@ -237,16 +246,20 @@ fn main() {
 
     let history = Arc::new(Mutex::new(ChatHistory::new()));
 
-    let connection = Arc::new(Mutex::new(Connection::new(&serverip, &window_handle)));
 
+    let recv_connection = TcpStream::connect(serverip).unwrap();
+    let send_connection = recv_connection.try_clone().unwrap();
 
+    let rconnection = Arc::new(Mutex::new(recv_connection));
+    let sconnection = Arc::new(Mutex::new(send_connection));
 
     let send_func: Box<dyn Fn()> = {
-        let connection = Arc::clone(&connection);
+        let connection = Arc::clone(&sconnection);
+
+
         let draw_pixels = Arc::clone(&draw_pixels);
         let cam_pixels = Arc::clone(&cam_pixels);
         Box::new(move || {
-            let mut connection = connection.lock().unwrap();
             let mut draw_pixels = draw_pixels.lock().unwrap();
             let cam_pixels = cam_pixels.lock().unwrap();
             
@@ -257,7 +270,7 @@ fn main() {
                     draw_pixels.data[i] = cam_pixels[i];
                 }
             }
-            connection.send(&draw_pixels);
+            send(&draw_pixels, &connection);
             (*draw_pixels).data.fill(127);
             println!("Sending");
         })
@@ -336,18 +349,41 @@ fn main() {
         })
     };
 
+    let toggle_text_func: Box<dyn Fn()> = {
+        let typer = Arc::clone(&typer);
+        let fixswaps = Arc::clone(&fixtureswapqueue);
+        Box::new(move || {
+            let mut fixswaps = fixswaps.lock().unwrap();
+            let mut typer = typer.lock().unwrap();
+            typer.typemode = !typer.typemode;
+            let (newx, newy) = match typer.typemode {
+                true => {
+                    (13, 0)
+                },
+                false => {
+                    (12, 0)
+                }
+            };
+            fixswaps.push(FixtureSwap{
+                tooltip: String::from("Text Mode"), 
+                newtexx: newx, 
+                newtexy: newy});
+        })
+    };
+
     fixtures.lock().unwrap().set_fixtures(vec![
         Fixture {x:-1.0, y: -1.0, width: 0.2, height: 0.1, tooltip: String::from("Clear Drawing"), texx: 6, texy: 0, func: clear_func},
         Fixture {x:-0.8, y: -1.0, width: 0.2, height: 0.1, tooltip: String::from("Brightnesss Down"), texx: 5, texy: 0, func: brightdown_func},
         Fixture {x:-0.6, y: -1.0, width: 0.2, height: 0.1, tooltip: String::from("Brightnesss Up"), texx: 4, texy: 0, func: brightup_func},
         Fixture {x:-0.4, y: -1.0, width: 0.2, height: 0.1, tooltip: String::from("Toggle Camera"), texx: 3, texy: 0, func: cam_func},
         Fixture {x:-0.2, y: -1.0, width: 0.2, height: 0.1, tooltip: String::from("Send Drawing"), texx: 1, texy: 0, func: send_func},
+        Fixture {x:0.0, y: -1.0, width: 0.2, height: 0.1, tooltip: String::from("Text Mode"), texx: 12, texy: 0, func: toggle_text_func},
         Fixture {x:0.8, y: 0.0, width: 0.2, height: 0.1, tooltip: String::from("Scroll To Present"), texx: 7, texy: 0, func: jump_to_present_func},
         Fixture {x:0.8, y: -1.0, width: 0.2, height: 0.1, tooltip: String::from("Swap Pen"), texx: 8, texy: 0, func: swap_pens_func}
     ]);
 
     
-
+    let mut recv_jh: Option<JoinHandle<()>> = None;
 
 
     while !window.should_close() {
@@ -368,7 +404,10 @@ fn main() {
         unsafe {
             gl::Clear(gl::COLOR_BUFFER_BIT);
             gl::ClearColor(0.0, 0.0, 0.0, 1.0);
-            history.lock().unwrap().draw(width, height, gl_setup.scroll_shader, &myname);
+            let was_dirty = history.lock().unwrap().draw(width, height, gl_setup.scroll_shader, &myname);
+            if was_dirty {
+                flash_window(window_handle);
+            }
             history.lock().unwrap().draw_names(width, height, gl_setup.scroll_shader, lock_fixtures.texture);
             gl_setup.update_texture(&draw_pixels.lock().unwrap().data);
             gl_setup.update_cam_texture(&cam_pixels.lock().unwrap());
@@ -407,35 +446,26 @@ fn main() {
             
         if !gotHistoryLength || !gotHistory {
 
-            let locked_conn = connection.lock().unwrap();
+            let mut locked_conn = rconnection.lock().unwrap();
 
-            let mut cloned_stream = {
-                let locked_stream = locked_conn.stream.lock().unwrap();
-                locked_stream.try_clone().unwrap() // Clone the TcpStream
-            };
-            drop(locked_conn); // Explicitly drop the lock
+            request_history_length(&myname, &mut locked_conn);
 
-            cloned_stream.set_nonblocking(false).unwrap();
-            
-            let mut locked_conn = connection.lock().unwrap();
-            (*locked_conn).request_history_length(&myname, &mut cloned_stream);
-            drop(locked_conn);
 
             let mut buffer = [0; crate::network::PACKET_SIZE];
 
-            match (cloned_stream).read_exact(&mut buffer) {
+            match (locked_conn).read_exact(&mut buffer) {
                 Ok(_) => {
                     let received_data: TextureData = bincode::deserialize(&buffer).unwrap();
                     let history_size = received_data.history_length;
                     gotHistoryLength = true;
 
-                    let mut locked_conn = connection.lock().unwrap();
-                    (*locked_conn).request_history(&myname, &mut cloned_stream);
-                    drop(locked_conn);
+
+                    request_history(&myname, &mut locked_conn);
+
 
                     let mut history_buffer = vec![0; history_size as usize];
 
-                    match (cloned_stream).read_exact(&mut history_buffer) {
+                    match (locked_conn).read_exact(&mut history_buffer) {
                         Ok(_) => {
                             let history_vec: Vec<TextureData> = bincode::deserialize(&history_buffer).unwrap();
                             gotHistory = true;
@@ -443,9 +473,7 @@ fn main() {
                             his.history = history_vec;
                             his.dirty = true;
                             
-                            let mut locked_conn = connection.lock().unwrap();
-                            (*locked_conn).confirm_history(&myname, &mut cloned_stream);
-                            drop(locked_conn);
+                            confirm_history(&myname, &mut locked_conn);
                         }
                         Err(e) => {
                             println!("Failed to read from server: {}", e);
@@ -456,12 +484,16 @@ fn main() {
                     println!("Failed to read from server: {}", e);
                 }
             }
+            drop(locked_conn);
+            //(cloned_stream).set_nonblocking(true).unwrap();
 
-            (cloned_stream).set_nonblocking(true).unwrap();
+            let connection_clone = Arc::clone(&rconnection);
+            let history_clone = Arc::clone(&history);
+            let should_close_clone = Arc::clone(&should_close);
 
-
-        } else {
-            connection.lock().unwrap().receive(&history);
+            recv_jh = Some(std::thread::spawn(move || {
+                receive(&history_clone, &connection_clone, &should_close_clone);
+            }));
         }
 
         for (_, event) in glfw::flush_messages(&events) {
@@ -524,5 +556,9 @@ fn main() {
 
         window.swap_buffers();
     }
-    connection.lock().unwrap().stream.lock().unwrap().shutdown(Shutdown::Both).unwrap();
+    should_close.store(true, Ordering::Relaxed);
+    recv_jh.unwrap().join().unwrap();
+
+    rconnection.lock().unwrap().shutdown(Shutdown::Both).unwrap();
+    sconnection.lock().unwrap().shutdown(Shutdown::Both).unwrap();
 }
