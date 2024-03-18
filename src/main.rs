@@ -22,6 +22,8 @@ use bincode::serialized_size;
 use std::io::{Read, Write};
 use std::time::{SystemTime, UNIX_EPOCH, Duration, Instant};
 
+use lerp::Lerp;
+
 mod history;
 mod glyphface;
 use std::io;
@@ -30,6 +32,8 @@ mod winflash;
 struct MousePos {
     x: i32, 
     y: i32,
+    lastx: i32,
+    lasty: i32,
     clicked: bool,
     button: glfw::MouseButton
 }
@@ -54,7 +58,7 @@ impl TextureData {
 
         TextureData {
             name: fixed_size_text,
-            data: [0; 200 * 200].to_vec(),
+            data: [127; 200 * 200].to_vec(),
             request_history: false,
             request_history_length: false,
             history_length: 0,
@@ -66,31 +70,48 @@ impl TextureData {
     fn draw(&mut self, mouse: &MousePos, pen: &PenState, width: i32, height: i32, value: u8) {
         let adjusted_m_y = (mouse.y - (height / 2)).max(0);
 
-        let m_x_dist = (mouse.x as f32 / width as f32).clamp(0.0, 1.0);
-        let m_y_dist = (adjusted_m_y as f32 / (height / 2) as f32).clamp(0.0, 1.0);
-
-        let d_x = (m_x_dist * 200.0) as i32;
-        let d_y = (m_y_dist * 200.0) as i32;
-
         let max = self.data.len() - 1;
 
-        let d_center = (d_y * 200 + d_x).clamp(0, max as i32);
+        let lastadjusted_m_y = (mouse.lasty - (height / 2)).max(0);
+ 
+        for i in 0..15 {
 
-        for o in pen.pentype.get_spots() {
-            let d_index = d_center + o.x as i32 + (o.y as i32 * 200);
-            self.data[d_index.clamp(0, max as i32) as usize] = value;
+            let t: f32 = i as f32 / 15.0;
+
+            let mut m_x_dist = (mouse.x as f32 / width as f32).clamp(0.0, 1.0);
+            let mut m_y_dist = (adjusted_m_y as f32 / (height / 2) as f32).clamp(0.0, 1.0);
+
+            let lastm_x_dist = (mouse.lastx as f32 / width as f32).clamp(0.0, 1.0);
+            let lastm_y_dist = (lastadjusted_m_y as f32 / (height / 2) as f32).clamp(0.0, 1.0);
+
+            m_x_dist = lastm_x_dist.lerp(m_x_dist, t);
+            m_y_dist = lastm_y_dist.lerp(m_y_dist, t);
+
+            let d_x = (m_x_dist * 200.0) as i32;
+            let d_y = (m_y_dist * 200.0) as i32;
+
+            let d_center = (d_y * 200 + d_x).clamp(0, max as i32);
+
+            for o in pen.pentype.get_spots() {
+                let d_index = d_center + o.x as i32 + (o.y as i32 * 200);
+                self.data[d_index.clamp(0, max as i32) as usize] = value;
+            }
         }
+            
+
     }
 }
 
 impl MousePos {
     pub fn new() -> MousePos {
         MousePos {
-            x: 0, y: 0, clicked: false, button: glfw::MouseButtonLeft
+            x: 0, y: 0, lastx: 0, lasty: 0, clicked: false, button: glfw::MouseButtonLeft
         }
     }
     fn update_pos(&mut self, window: &mut glfw::Window) {
         let (xpos, ypos) = window.get_cursor_pos();
+        self.lastx = self.x;
+        self.lasty = self.y;
         self.x = xpos as i32;
         self.y = ypos as i32;
     }
@@ -120,6 +141,12 @@ impl CameraStuff {
             self.camera_mode = false;
         }
     }
+}
+
+struct FixtureSwap {
+    tooltip: String,
+    newtexx: i8,
+    newtexy: i8
 }
 
 fn increase_contrast(image: &[u8], factor: f32) -> Vec<u8> {
@@ -177,7 +204,7 @@ fn main() {
     let mut gotHistory = false;
     
     let mut mouse = MousePos::new();
-    let penstate = PenState::new(PenType::ThinPen);
+    let penstate = Arc::new(Mutex::new(PenState::new(PenType::ThinPen)));
 
     let mut glfw = glfw::init(glfw::fail_on_errors).unwrap();
 
@@ -200,30 +227,38 @@ fn main() {
 
     let mut gl_setup = GlSetup::new();
     let draw_pixels = Arc::new(Mutex::new(TextureData::new(&myname)));
-    let mut fixtures = Fixtures::new().unwrap();
+    let cam_pixels: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(vec![0u8; 200*200]));
+    let mut fixtures = Arc::new(Mutex::new(Fixtures::new().unwrap()));
 
-    let serialized_size = serialized_size(&(*(draw_pixels.lock().unwrap()))).unwrap();
+    let mut fixtureswapqueue: Arc<Mutex<Vec<FixtureSwap>>> = Arc::new(Mutex::new(Vec::new()));
+
+    //let serialized_size = serialized_size(&(*(draw_pixels.lock().unwrap()))).unwrap();
     //println!("Serialized size of TextureData: {} bytes", serialized_size);
 
     let history = Arc::new(Mutex::new(ChatHistory::new()));
 
     let connection = Arc::new(Mutex::new(Connection::new(&serverip, &window_handle)));
 
-    let test_func = Box::new(|| {
-        println!("Test!");
-    });
 
 
     let send_func: Box<dyn Fn()> = {
         let connection = Arc::clone(&connection);
         let draw_pixels = Arc::clone(&draw_pixels);
+        let cam_pixels = Arc::clone(&cam_pixels);
         Box::new(move || {
             let mut connection = connection.lock().unwrap();
             let mut draw_pixels = draw_pixels.lock().unwrap();
+            let cam_pixels = cam_pixels.lock().unwrap();
+            
             let now = SystemTime::now();
             draw_pixels.timestamp = now.duration_since(UNIX_EPOCH).unwrap().as_millis();
+            for i in 0..200*200 {
+                if draw_pixels.data[i] == 127 as u8 {
+                    draw_pixels.data[i] = cam_pixels[i];
+                }
+            }
             connection.send(&draw_pixels);
-            (*draw_pixels).data.fill(0);
+            (*draw_pixels).data.fill(127);
             println!("Sending");
         })
     };
@@ -232,7 +267,7 @@ fn main() {
         let draw_pixels = Arc::clone(&draw_pixels);
         Box::new(move || {
             let mut draw_pixels = draw_pixels.lock().unwrap();
-            (*draw_pixels).data.fill(0);
+            (*draw_pixels).data.fill(127);
         })
     };
 
@@ -246,13 +281,13 @@ fn main() {
 
     let cam_func: Box<dyn Fn()> = {
         let cam = Arc::clone(&cam);
-        let draw_pixels = Arc::clone(&draw_pixels);
+        let cam_pixels = Arc::clone(&cam_pixels);
         Box::new(move || {
             let mut cam = cam.lock().unwrap();
-            let mut draw_pixels = draw_pixels.lock().unwrap();
+            let mut cam_pixels = cam_pixels.lock().unwrap();
             cam.toggle();
             if !cam.camera_mode {
-                (*draw_pixels).data.fill(0);
+                (*cam_pixels).fill(0);
             }
         })
     };
@@ -273,14 +308,46 @@ fn main() {
         })
     };
 
-    fixtures.set_fixtures(vec![
+    let swap_pens_func: Box<dyn Fn()> = {
+        let pens = Arc::clone(&penstate);
+        let fixswaps = Arc::clone(&fixtureswapqueue);
+        Box::new(move || {
+            let mut pens = pens.lock().unwrap();
+            let mut fixswaps = fixswaps.lock().unwrap();
+            pens.pentype = pens.pentype.next();
+            let (newx, newy) = match pens.pentype {
+                PenType::ThinPen => {
+                    (8, 0)
+                },
+                PenType::FatPen => {
+                    (9, 0)
+                },
+                PenType::HugePen => {
+                    (10, 0)
+                },
+                PenType::TinyPen => {
+                    (11, 0)
+                }
+            };
+            fixswaps.push(FixtureSwap{
+                tooltip: String::from("Swap Pen"), 
+                newtexx: newx, 
+                newtexy: newy});
+        })
+    };
+
+    fixtures.lock().unwrap().set_fixtures(vec![
         Fixture {x:-1.0, y: -1.0, width: 0.2, height: 0.1, tooltip: String::from("Clear Drawing"), texx: 6, texy: 0, func: clear_func},
         Fixture {x:-0.8, y: -1.0, width: 0.2, height: 0.1, tooltip: String::from("Brightnesss Down"), texx: 5, texy: 0, func: brightdown_func},
         Fixture {x:-0.6, y: -1.0, width: 0.2, height: 0.1, tooltip: String::from("Brightnesss Up"), texx: 4, texy: 0, func: brightup_func},
         Fixture {x:-0.4, y: -1.0, width: 0.2, height: 0.1, tooltip: String::from("Toggle Camera"), texx: 3, texy: 0, func: cam_func},
         Fixture {x:-0.2, y: -1.0, width: 0.2, height: 0.1, tooltip: String::from("Send Drawing"), texx: 1, texy: 0, func: send_func},
         Fixture {x:0.8, y: 0.0, width: 0.2, height: 0.1, tooltip: String::from("Scroll To Present"), texx: 7, texy: 0, func: jump_to_present_func},
+        Fixture {x:0.8, y: -1.0, width: 0.2, height: 0.1, tooltip: String::from("Swap Pen"), texx: 8, texy: 0, func: swap_pens_func}
     ]);
+
+    
+
 
 
     while !window.should_close() {
@@ -291,27 +358,35 @@ fn main() {
         delta_time = current_time.duration_since(previous_time).as_secs_f32();
         previous_time = current_time;
 
+        let mut lock_fixtures = fixtures.lock().unwrap();
+
+        for fixswap in &(*(fixtureswapqueue.lock().unwrap())) {
+            lock_fixtures.change_tex_coords(String::from(&fixswap.tooltip), fixswap.newtexx, fixswap.newtexy);
+        }
+        (fixtureswapqueue.lock().unwrap()).clear();
+
         unsafe {
             gl::Clear(gl::COLOR_BUFFER_BIT);
             gl::ClearColor(0.0, 0.0, 0.0, 1.0);
             history.lock().unwrap().draw(width, height, gl_setup.scroll_shader, &myname);
-            history.lock().unwrap().draw_names(width, height, gl_setup.scroll_shader, fixtures.texture);
+            history.lock().unwrap().draw_names(width, height, gl_setup.scroll_shader, lock_fixtures.texture);
             gl_setup.update_texture(&draw_pixels.lock().unwrap().data);
+            gl_setup.update_cam_texture(&cam_pixels.lock().unwrap());
             gl_setup.draw();
-            fixtures.draw(gl_setup.menu_shader);
-            fixtures.draw_tooltip(&window, gl_setup.menu_shader);
+            lock_fixtures.draw(gl_setup.menu_shader);
+            lock_fixtures.draw_tooltip(&window, gl_setup.menu_shader);
         }
-        fixtures.get_moused_over(&mouse, width, height);
+        lock_fixtures.get_moused_over(&mouse, width, height);
         unsafe {
             let moe_location = gl::GetUniformLocation(gl_setup.menu_shader, b"mousedOverElement\0".as_ptr() as *const i8);
-            gl::Uniform1f(moe_location, fixtures.moused_over_id);
+            gl::Uniform1f(moe_location, lock_fixtures.moused_over_id);
             let coe_location = gl::GetUniformLocation(gl_setup.menu_shader, b"clickedOnElement\0".as_ptr() as *const i8);
-            gl::Uniform1f(coe_location, fixtures.clicked_on_id); 
+            gl::Uniform1f(coe_location, lock_fixtures.clicked_on_id); 
         }
 
         let lock_cam = cam.lock().unwrap();
         if lock_cam.camera_mode {
-            if cam_timer > 0.5 {
+            if cam_timer > 0.25 {
                 let frame = lock_cam.camera.as_ref().unwrap().capture().expect("Failed to cap frame");
 
                 let extracted_data: Vec<u8> = frame
@@ -321,7 +396,7 @@ fn main() {
 
                 let contrast_frame = increase_contrast(&extracted_data, 5.0);
 
-                draw_pixels.lock().unwrap().data.clone_from_slice(&contrast_frame);
+                cam_pixels.lock().unwrap().clone_from_slice(&contrast_frame);
                 
                 cam_timer = 0.0;
             } else {
@@ -398,12 +473,12 @@ fn main() {
                     mouse.clicked = action == Action::Press;
                     mouse.button = mousebutton;
                     if action == Action::Release {
-                        if fixtures.clicked_on_id != 0.0 {
-                            (fixtures.fixtures[(fixtures.clicked_on_id - 1.0) as usize].func)();
+                        if lock_fixtures.clicked_on_id != 0.0 {
+                            (lock_fixtures.fixtures[(lock_fixtures.clicked_on_id - 1.0) as usize].func)();
                         }
-                        fixtures.clicked_on_id = 0.0;
+                        lock_fixtures.clicked_on_id = 0.0;
                     } else if action == Action::Press {
-                        fixtures.clicked_on_id = fixtures.moused_over_id;
+                        lock_fixtures.clicked_on_id = lock_fixtures.moused_over_id;
                     }
                 },
                 glfw::WindowEvent::FramebufferSize(wid, hei) => {
@@ -435,16 +510,17 @@ fn main() {
         if mouse.clicked {
             match mouse.button {
                 glfw::MouseButtonLeft => {
-                    if fixtures.moused_over_id == 0.0 {
-                        draw_pixels.lock().unwrap().draw(&mouse, &penstate, width, height, 254);
+                    if lock_fixtures.moused_over_id == 0.0 {
+                        draw_pixels.lock().unwrap().draw(&mouse, &penstate.lock().unwrap(), width, height, 254);
                     }
                 },
                 glfw::MouseButtonRight => {
-                    draw_pixels.lock().unwrap().draw(&mouse, &penstate, width, height, 0);
+                    draw_pixels.lock().unwrap().draw(&mouse, &penstate.lock().unwrap(), width, height, 0);
                 },
                 _ => ()
             }
         }
+        drop(lock_fixtures);
 
         window.swap_buffers();
     }

@@ -26,7 +26,8 @@ struct TextureData {
 
 struct Client {
     stream: TcpStream,
-    has_history: bool
+    has_history: bool,
+    errorstrikes: i8
 }
 
 struct History {
@@ -134,6 +135,12 @@ fn handle_client(client_id: usize, clients: Arc<Mutex<HashMap<usize, Client>>>, 
                             should_break = true;
                         } else {
                             println!("Failed to receive from client: {}", e);
+                            let mut clients = clients.lock().unwrap();
+                            clients.get_mut(&client_id).unwrap().errorstrikes += 1;
+
+                            if clients.get_mut(&client_id).unwrap().errorstrikes > 4 {
+                                should_break = true;
+                            }
                         }
                     }
                 }
@@ -176,7 +183,8 @@ fn main() {
                     client_id,
                     Client {
                         stream: stream.try_clone().unwrap(),
-                        has_history: false
+                        has_history: false,
+                        errorstrikes: 0
                     },
                 );
                 println!("Clients len is now {}", locked_clients.len());

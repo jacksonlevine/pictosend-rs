@@ -29,6 +29,17 @@ pub struct Fixtures {
 }
 
 impl Fixtures {
+    pub fn change_tex_coords(&mut self, tooltip: String, newtexx: i8, newtexy: i8) {
+        let found_fix = self.fixtures.iter_mut().find(|item| item.tooltip == tooltip);
+        match found_fix {
+            Some(fix) => {
+                fix.texx = newtexx;
+                fix.texy = newtexy;
+                self.dirty = true;
+            },
+            None => ()
+        };
+    }
     pub fn get_moused_over(&mut self, mouse: &MousePos, windowwidth: i32, windowheight: i32) {
         for (index, fix) in self.fixtures.iter().enumerate() {
             let spx: f32 = (fix.x + 1.0) * 0.5;
