@@ -26,6 +26,7 @@ pub struct Fixtures {
     pub texture: gl::types::GLuint,
     pub moused_over_id: f32,
     pub clicked_on_id: f32,
+    pub guitexpixels: Vec<u8>
 }
 
 impl Fixtures {
@@ -93,6 +94,15 @@ impl Fixtures {
     
             gl::BindTexture(gl::TEXTURE_2D, 0);
         }
+
+        let mut guipix: Vec<u8> = Vec::new();
+        guipix.extend_from_slice(img.to_rgba8().as_flat_samples().as_slice());
+
+        guipix = guipix
+            .chunks(4)
+            .map(|chunk| chunk[0])
+            .collect();
+
         Ok(
             Fixtures {
                 fixtures: Vec::new(),
@@ -102,7 +112,8 @@ impl Fixtures {
                 data: Vec::new(),
                 texture,
                 moused_over_id: 0.0,
-                clicked_on_id: 0.0
+                clicked_on_id: 0.0,
+                guitexpixels: guipix
             }
         )
     }
