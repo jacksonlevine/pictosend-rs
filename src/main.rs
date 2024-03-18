@@ -170,6 +170,22 @@ fn increase_contrast(image: &[u8], factor: f32) -> Vec<u8> {
         .collect()
 }
 
+
+fn glfw_mouse_pos_to_canvas_pos(mouse: &MousePos, window: &glfw::Window) -> (i32, i32) {
+    let (width, height) = window.get_size();
+
+    let adjusted_m_y = (mouse.y - (height / 2)).max(0);
+
+    let mut m_x_dist = (mouse.x as f32 / width as f32).clamp(0.0, 1.0);
+    let mut m_y_dist = (adjusted_m_y as f32 / (height / 2) as f32).clamp(0.0, 1.0);
+
+    let d_x = (m_x_dist * 200.0) as i32;
+    let d_y = (m_y_dist * 200.0) as i32;
+
+    return (d_x, d_y);
+}
+
+
 fn main() {
     let mut previous_time = Instant::now();
     let mut delta_time: f32 = 0.0;
@@ -231,11 +247,13 @@ fn main() {
     window.set_mouse_button_polling(true);
     window.set_scroll_polling(true);
     window.set_focus_polling(true);
+    window.set_char_polling(true);
     window.make_current();
 
     let mut gl_setup = GlSetup::new();
     let draw_pixels = Arc::new(Mutex::new(TextureData::new(&myname)));
     let cam_pixels: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(vec![0u8; 200*200]));
+    let text_pixels: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(vec![127u8; 200*200]));
     let mut fixtures = Arc::new(Mutex::new(Fixtures::new().unwrap()));
     let mut typer = Arc::new(Mutex::new(Typer::new()));
 
@@ -259,19 +277,25 @@ fn main() {
 
         let draw_pixels = Arc::clone(&draw_pixels);
         let cam_pixels = Arc::clone(&cam_pixels);
+        let text_pixels = Arc::clone(&text_pixels);
         Box::new(move || {
             let mut draw_pixels = draw_pixels.lock().unwrap();
             let cam_pixels = cam_pixels.lock().unwrap();
-            
+            let mut text_pixels = text_pixels.lock().unwrap();
+
             let now = SystemTime::now();
             draw_pixels.timestamp = now.duration_since(UNIX_EPOCH).unwrap().as_millis();
             for i in 0..200*200 {
                 if draw_pixels.data[i] == 127 as u8 {
                     draw_pixels.data[i] = cam_pixels[i];
                 }
+                if text_pixels[i] != 127 as u8 {
+                    draw_pixels.data[i] = text_pixels[i];
+                }
             }
             send(&draw_pixels, &connection);
             (*draw_pixels).data.fill(127);
+            (*text_pixels).fill(127);
             println!("Sending");
         })
     };
@@ -361,6 +385,7 @@ fn main() {
                     (13, 0)
                 },
                 false => {
+                    typer.started = false;
                     (12, 0)
                 }
             };
@@ -368,6 +393,7 @@ fn main() {
                 tooltip: String::from("Text Mode"), 
                 newtexx: newx, 
                 newtexy: newy});
+            drop(typer);
         })
     };
 
@@ -411,6 +437,7 @@ fn main() {
             history.lock().unwrap().draw_names(width, height, gl_setup.scroll_shader, lock_fixtures.texture);
             gl_setup.update_texture(&draw_pixels.lock().unwrap().data);
             gl_setup.update_cam_texture(&cam_pixels.lock().unwrap());
+            gl_setup.update_text_texture(&text_pixels.lock().unwrap());
             gl_setup.draw();
             lock_fixtures.draw(gl_setup.menu_shader);
             lock_fixtures.draw_tooltip(&window, gl_setup.menu_shader);
@@ -422,6 +449,7 @@ fn main() {
             let coe_location = gl::GetUniformLocation(gl_setup.menu_shader, b"clickedOnElement\0".as_ptr() as *const i8);
             gl::Uniform1f(coe_location, lock_fixtures.clicked_on_id); 
         }
+        drop(lock_fixtures);
 
         let lock_cam = cam.lock().unwrap();
         if lock_cam.camera_mode {
@@ -496,21 +524,58 @@ fn main() {
             }));
         }
 
+
         for (_, event) in glfw::flush_messages(&events) {
             match event {
                 glfw::WindowEvent::Key(Key::Escape, _, Action::Press, _) => {
                     window.set_should_close(true)
                 },
+                glfw::WindowEvent::Key(Key::Backspace, _, Action::Press, _) => {
+                    let mut typerlock = typer.lock().unwrap();
+
+                    if typerlock.started {
+                        typerlock.backspace(&mut text_pixels.lock().unwrap());
+                    }
+
+                    drop(typerlock);
+                },
+                glfw::WindowEvent::Key(Key::Enter, _, Action::Press, _) => {
+                    let mut typerlock = typer.lock().unwrap();
+
+                    if typerlock.started {
+                        typerlock.type_letter(&mut text_pixels.lock().unwrap(), 10, &fixtures.lock().unwrap().guitexpixels);
+                    }
+
+                    drop(typerlock);
+                },
+                glfw::WindowEvent::Char(code) => {
+                    
+                    let mut typerlock = typer.lock().unwrap();
+                    if typerlock.started {
+                        typerlock.type_letter(&mut text_pixels.lock().unwrap(), code as u8, &fixtures.lock().unwrap().guitexpixels);
+                    }
+                    drop(typerlock);
+                },
                 glfw::WindowEvent::MouseButton(mousebutton, action, _) => {
                     mouse.clicked = action == Action::Press;
                     mouse.button = mousebutton;
+                    let mut lock_fixtures = fixtures.lock().unwrap();
                     if action == Action::Release {
                         if lock_fixtures.clicked_on_id != 0.0 {
                             (lock_fixtures.fixtures[(lock_fixtures.clicked_on_id - 1.0) as usize].func)();
                         }
                         lock_fixtures.clicked_on_id = 0.0;
                     } else if action == Action::Press {
-                        lock_fixtures.clicked_on_id = lock_fixtures.moused_over_id;
+                        if lock_fixtures.moused_over_id != 0.0 {
+                            lock_fixtures.clicked_on_id = lock_fixtures.moused_over_id;
+                        } else {
+                            let mut typerlock = typer.lock().unwrap();
+                            if typerlock.typemode {
+                                let (x, y) = glfw_mouse_pos_to_canvas_pos(&mouse, &window);
+                                typerlock.place_head_and_start(x, y);
+                            }
+                            drop(typerlock);
+                        }
                     }
                 },
                 glfw::WindowEvent::FramebufferSize(wid, hei) => {
@@ -540,19 +605,22 @@ fn main() {
         }
 
         if mouse.clicked {
-            match mouse.button {
-                glfw::MouseButtonLeft => {
-                    if lock_fixtures.moused_over_id == 0.0 {
-                        draw_pixels.lock().unwrap().draw(&mouse, &penstate.lock().unwrap(), width, height, 254);
-                    }
-                },
-                glfw::MouseButtonRight => {
-                    draw_pixels.lock().unwrap().draw(&mouse, &penstate.lock().unwrap(), width, height, 0);
-                },
-                _ => ()
+            if !typer.lock().unwrap().typemode {
+                match mouse.button {
+                    glfw::MouseButtonLeft => {
+                        let mut lock_fixtures = fixtures.lock().unwrap();
+                        if lock_fixtures.moused_over_id == 0.0 {
+                            draw_pixels.lock().unwrap().draw(&mouse, &penstate.lock().unwrap(), width, height, 254);
+                        }
+                    },
+                    glfw::MouseButtonRight => {
+                        draw_pixels.lock().unwrap().draw(&mouse, &penstate.lock().unwrap(), width, height, 0);
+                    },
+                    _ => ()
+                }
             }
         }
-        drop(lock_fixtures);
+        
 
         window.swap_buffers();
     }

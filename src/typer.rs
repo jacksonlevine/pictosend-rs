@@ -27,6 +27,7 @@ impl ArrayCoord {
 
 pub struct Typer {
     pub typemode: bool,
+    pub started: bool,
     pub current_start: ArrayCoord,
     pub head: ArrayCoord,
     gwidth: i32,
@@ -38,6 +39,7 @@ impl Typer {
     pub fn new() -> Typer {
         Typer {
             typemode: false,
+            started: false,
             current_start: ArrayCoord::new(0,0),
             head: ArrayCoord::new(0,0),
             gwidth: 16,
@@ -48,6 +50,7 @@ impl Typer {
     pub fn place_head_and_start(&mut self, x: i32, y: i32) {
         self.head.set(x, y);
         self.current_start.set(x, y);
+        self.started = true;
     }
     pub fn type_letter(&mut self, canvas: &mut Vec<u8>, charcode: u8, guitex: &Vec<u8>) {
 
@@ -72,6 +75,19 @@ impl Typer {
             self.head.x += self.gwidth;
         }
     }
+    pub fn backspace(&mut self, canvas: &mut Vec<u8>) {
+            self.head.x -= self.gwidth;
+            let start_index = self.head.to_index();
+
+            for i in 0..self.gheight {
+                let row_start_index = start_index + i * CANVAS_WIDTH;
+                for k in 0..self.gwidth {
+                    let current_row_index = row_start_index + k;
+
+                    canvas[current_row_index as usize] = 127;
+                }
+            }
+    }
     fn letter_buffer(&mut self, charcode: u8, guitex: &Vec<u8>) -> Vec<u8> {
         let mut vec = Vec::new();
 
@@ -82,7 +98,7 @@ impl Typer {
         let y_start = (self.g.tly * 544.0) as i32;
 
         for i in 0..self.gheight {
-            let row_start = x_start + y_start * 544;
+            let row_start = x_start + (y_start + i) * 544;
 
             for k in 0..self.gwidth {
                 let index = row_start + k;

@@ -12,6 +12,7 @@ pub struct GlSetup {
     pub vao: gl::types::GLuint,
     pub vbo: gl::types::GLuint,
     pub texture: gl::types::GLuint,
+    pub text_texture: gl::types::GLuint,
     pub cam_texture: gl::types::GLuint
 }
 
@@ -57,6 +58,7 @@ impl GlSetup {
         let mut vbo: gl::types::GLuint = 0;
         let mut tex: gl::types::GLuint = 0;
         let mut camtex: gl::types::GLuint = 0;
+        let mut texttex: gl::types::GLuint = 0;
 
         unsafe {
             gl::GenVertexArrays(1, &mut vao); 
@@ -72,6 +74,14 @@ impl GlSetup {
 
             gl::GenTextures(1, &mut camtex);
             gl::BindTexture(gl::TEXTURE_2D, camtex);
+            gl::TexImage2D(gl::TEXTURE_2D, 0, gl::RED as i32, 200, 200, 0, gl::RED, gl::UNSIGNED_BYTE, std::ptr::null());
+            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::NEAREST as i32);
+            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::NEAREST as i32);
+            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_S, gl::CLAMP_TO_EDGE as i32);
+            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_T, gl::CLAMP_TO_EDGE as i32);
+
+            gl::GenTextures(1, &mut texttex);
+            gl::BindTexture(gl::TEXTURE_2D, texttex);
             gl::TexImage2D(gl::TEXTURE_2D, 0, gl::RED as i32, 200, 200, 0, gl::RED, gl::UNSIGNED_BYTE, std::ptr::null());
             gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::NEAREST as i32);
             gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::NEAREST as i32);
@@ -133,6 +143,7 @@ impl GlSetup {
             vao,
             vbo,
             texture: tex,
+            text_texture: texttex,
             cam_texture: camtex
         }
     }
@@ -147,6 +158,9 @@ impl GlSetup {
             
             gl::BindTexture(gl::TEXTURE_2D, self.texture);
             gl::UseProgram(self.draw_shader);
+            gl::DrawArrays(gl::TRIANGLES, 0, 6);
+
+            gl::BindTexture(gl::TEXTURE_2D, self.text_texture);
             gl::DrawArrays(gl::TRIANGLES, 0, 6);
         }
     }
@@ -171,6 +185,23 @@ impl GlSetup {
     pub fn update_cam_texture(&mut self, data: &[u8]) {
         unsafe {
             gl::BindTexture(gl::TEXTURE_2D, self.cam_texture);
+            gl::TexSubImage2D(
+                gl::TEXTURE_2D,
+                0,
+                0,
+                0,
+                200,
+                200,
+                gl::RED,
+                gl::UNSIGNED_BYTE,
+                data.as_ptr() as *const gl::types::GLvoid
+            );
+        }
+    }
+
+    pub fn update_text_texture(&mut self, data: &[u8]) {
+        unsafe {
+            gl::BindTexture(gl::TEXTURE_2D, self.text_texture);
             gl::TexSubImage2D(
                 gl::TEXTURE_2D,
                 0,
