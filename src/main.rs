@@ -171,7 +171,7 @@ fn increase_contrast(image: &[u8], factor: f32) -> Vec<u8> {
 }
 
 
-fn glfw_mouse_pos_to_canvas_pos(mouse: &MousePos, window: &glfw::Window) -> (i32, i32) {
+fn glfw_mouse_pos_to_canvas_pos(mouse: &MousePos, window: &glfw::Window) -> (u16, u16) {
     let (width, height) = window.get_size();
 
     let adjusted_m_y = (mouse.y - (height / 2)).max(0);
@@ -179,8 +179,8 @@ fn glfw_mouse_pos_to_canvas_pos(mouse: &MousePos, window: &glfw::Window) -> (i32
     let mut m_x_dist = (mouse.x as f32 / width as f32).clamp(0.0, 1.0);
     let mut m_y_dist = (adjusted_m_y as f32 / (height / 2) as f32).clamp(0.0, 1.0);
 
-    let d_x = (m_x_dist * 200.0) as i32;
-    let d_y = (m_y_dist * 200.0) as i32;
+    let d_x = (m_x_dist * 200.0) as u16;
+    let d_y = (m_y_dist * 200.0) as u16;
 
     return (d_x, d_y);
 }
@@ -302,9 +302,12 @@ fn main() {
 
     let clear_func: Box<dyn Fn()> = {
         let draw_pixels = Arc::clone(&draw_pixels);
+        let text_pixels = Arc::clone(&text_pixels);
         Box::new(move || {
             let mut draw_pixels = draw_pixels.lock().unwrap();
+            let mut text_pixels = text_pixels.lock().unwrap();
             (*draw_pixels).data.fill(127);
+            (*text_pixels).fill(127);
         })
     };
 
@@ -319,13 +322,27 @@ fn main() {
     let cam_func: Box<dyn Fn()> = {
         let cam = Arc::clone(&cam);
         let cam_pixels = Arc::clone(&cam_pixels);
+        let fixswaps = Arc::clone(&fixtureswapqueue);
+            
         Box::new(move || {
             let mut cam = cam.lock().unwrap();
             let mut cam_pixels = cam_pixels.lock().unwrap();
+            let mut fixswaps = fixswaps.lock().unwrap();
             cam.toggle();
-            if !cam.camera_mode {
-                (*cam_pixels).fill(0);
-            }
+
+            let (newx, newy) = match cam.camera_mode {
+                true => {
+                    (14, 0)
+                },
+                false => {
+                    (*cam_pixels).fill(0);
+                    (3, 0)
+                }
+            };
+            fixswaps.push(FixtureSwap{
+                tooltip: String::from("Toggle Camera"), 
+                newtexx: newx, 
+                newtexy: newy});
         })
     };
 
