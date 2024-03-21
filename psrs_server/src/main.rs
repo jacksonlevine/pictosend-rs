@@ -1,3 +1,4 @@
+use core::num;
 use std::char::MAX;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -43,7 +44,27 @@ impl History {
     }
 }
 
+#[derive(Serialize, Deserialize, PartialEq)]
+enum InfoMsg {
+    RequestHistoryLength,
+    HistoryLength,
+    RequestHistory,
+    ConfirmReceivedHistory,
+    Nothing
+}
+#[derive(Serialize, Deserialize)]
+struct InfoData {
+    msg: InfoMsg,
+    number: i32
+}
+
 fn handle_client(client_id: Uuid, clients: Arc<Mutex<HashMap<Uuid, Client>>>, history: Arc<Mutex<History>>) {
+    let mut info = InfoData {
+        msg: InfoMsg::Nothing,
+        number: 0
+    };
+    let infosize = serialized_size(&info).unwrap() as usize;
+    println!("is: {infosize}");
     let mut buffer = [0; PACKET_SIZE];
     let mut cliname = String::new();
     loop {
@@ -55,80 +76,105 @@ fn handle_client(client_id: Uuid, clients: Arc<Mutex<HashMap<Uuid, Client>>>, hi
                 clients[&client_id].stream.try_clone().expect("Failed to clone stream")
             };
             
-                match stream.read_exact(&mut buffer) {
+                match stream.read(&mut buffer) {
 
-                    Ok(_) => {
+                    Ok(numbytes) => {
+
                         
-                        let texture_data: TextureData = bincode::deserialize(&buffer).unwrap();
-                        let name = String::from_utf8(texture_data.name.to_vec()).unwrap();
-                        cliname = name.clone();
+                        if numbytes == infosize {
+                            println!("Got an info data");
+                            let info_data: InfoData = bincode::deserialize(&buffer[..infosize]).unwrap();
+                            match info_data.msg {
+                                InfoMsg::RequestHistoryLength => {
+                                                    println!("Got history length request");
+                                                    let history_locked = history.lock().unwrap();
+                                                    let response = InfoData {
+                                                        msg: InfoMsg::HistoryLength,
+                                                        number: serialized_size(&((*history_locked).history)).unwrap() as i32,
+                                                    };
+                                                    let serialized_data = bincode::serialize(&response).unwrap();
+                                                    stream.write_all(&serialized_data).unwrap();
+                                                    println!("Sent history length, now expecting history request");
+                                                    match stream.read(&mut buffer) {
+                                                        Ok(bb) => {
+                                                            println!("Got {bb} bytes response, gonna read {infosize} bytes of it");
+                                                            let history_req: InfoData = bincode::deserialize(&buffer[..infosize]).unwrap();
+                                                            if history_req.msg == InfoMsg::RequestHistory {
+                                                                println!("It's a history request, sending history");
+                                                                let history_data = bincode::serialize(&((*history_locked).history)).unwrap();
+                                                                stream.write_all(&history_data).unwrap();
+                                                                println!("Sent history");
+                                                                match stream.read(&mut buffer) {
+                                                                    Ok(bb) => {
+                                                                        println!("Got {bb} bytes, expecting it to be confirmation");
+                                                                        let confirm: InfoData = bincode::deserialize(&buffer[..infosize]).unwrap();
+                                                                        if confirm.msg == InfoMsg::ConfirmReceivedHistory {
+                                                                            println!("It was confirmation");
+                                                                            let mut clients = clients.lock().unwrap();
+                                                                            clients.get_mut(&client_id).unwrap().has_history = true;
+                                                                        }
+                                                                    },
+                                                                    Err(e) => {
+                                    
+                                                                    }
+                                                                }
+                                                            }
+                                                        },
+                                                        Err(e) => {
 
-                        println!("Got something from client {}", name);
-
-                        if texture_data.request_history_length {
-                            let history_locked = history.lock().unwrap();
-                            let response = TextureData {
-                                name: [0u8; 24],
-                                data: vec![0u8; 200*200],
-                                request_history: false,
-                                request_history_length: false,
-                                history_length: serialized_size(&((*history_locked).history)).unwrap() as i32,
-                                confirm_history: false,
-                                timestamp: 0
-                            };
-                            let serialized_data = bincode::serialize(&response).unwrap();
-                            stream.write_all(&serialized_data).unwrap();
-                            match stream.read_exact(&mut buffer) {
-                                Ok(_) => {
-                                    let history_req: TextureData = bincode::deserialize(&buffer).unwrap();
-                                    if history_req.request_history {
-                                        let history_data = bincode::serialize(&((*history_locked).history)).unwrap();
-                                        stream.write_all(&history_data).unwrap();
-                                        match stream.read_exact(&mut buffer) {
-                                            Ok(_) => {
-                                                let confirm: TextureData = bincode::deserialize(&buffer).unwrap();
-                                                if confirm.confirm_history {
-                                                    let mut clients = clients.lock().unwrap();
-                                                    clients.get_mut(&client_id).unwrap().has_history = true;
-                                                }
-                                            },
-                                            Err(e) => {
-            
-                                            }
-                                        }
-                                    }
+                                                        }
+                                                    }
                                 },
-                                Err(e) => {
+                                InfoMsg::RequestHistory => {},
+                                InfoMsg::HistoryLength => {},
+                                InfoMsg::ConfirmReceivedHistory => {},
+                                InfoMsg::Nothing => {},
+                            }
 
-                                }
-                            }
-                        } else {
-                            // Add the message to history
-                            let mut history_locked = history.lock().unwrap();
-                            (*history_locked).history.push(texture_data);
-                            if (*history_locked).history.len() > MAX_HISTORY {
-                                (*history_locked).history.remove(0);
-                            }
-                            (*history_locked).history.sort_by_key(|item| item.timestamp);
-                            println!("History len is now {}", (*history_locked).history.len());
-                            // Serialize and save (overwrite) to file
-                            let file = OpenOptions::new()
-                                .write(true)
-                                .create(true)
-                                .truncate(true)
-                                .open("history")
-                                .unwrap();
-                            let writer = BufWriter::new(file);
-                            bincode::serialize_into(writer, &(*history_locked).history).unwrap();
+                        } else if numbytes == PACKET_SIZE {
 
-                            // Send updated texture data to all clients
-                            let mut clients = clients.lock().unwrap();
-                            for client in clients.values_mut() {
-                                if(client.has_history) {
-                                    let _ = client.stream.write_all(&buffer);
-                                }
-                            }
+
+                                                    let texture_data: TextureData = bincode::deserialize(&buffer).unwrap();
+                                                    let name = String::from_utf8(texture_data.name.to_vec()).unwrap();
+                                                    cliname = name.clone();
+                            
+                                                    println!("Got something from client {}", name);
+                            
+                                                    if texture_data.request_history_length {
+                                                        
+                                                    } else {
+                                                        // Add the message to history
+                                                        let mut history_locked = history.lock().unwrap();
+                                                        (*history_locked).history.push(texture_data);
+                                                        if (*history_locked).history.len() > MAX_HISTORY {
+                                                            (*history_locked).history.remove(0);
+                                                        }
+                                                        (*history_locked).history.sort_by_key(|item| item.timestamp);
+                                                        println!("History len is now {}", (*history_locked).history.len());
+                                                        // Serialize and save (overwrite) to file
+                                                        let file = OpenOptions::new()
+                                                            .write(true)
+                                                            .create(true)
+                                                            .truncate(true)
+                                                            .open("history")
+                                                            .unwrap();
+                                                        let writer = BufWriter::new(file);
+                                                        bincode::serialize_into(writer, &(*history_locked).history).unwrap();
+                            
+                                                        // Send updated texture data to all clients
+                                                        let mut clients = clients.lock().unwrap();
+                                                        for client in clients.values_mut() {
+                                                            if client.has_history {
+                                                                let _ = client.stream.write_all(&buffer);
+                                                            }
+                                                        }
+                                                    }
+
+
                         }
+
+
+                        
                         
                     }
                     Err(e) => {

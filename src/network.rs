@@ -3,6 +3,8 @@ use std::net::TcpStream;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
+use serde::{Deserialize, Serialize};
+
 use crate::TextureData;
 use crate::history::ChatHistory;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -25,6 +27,21 @@ const MAX_HISTORY: usize = 56;
 //             stream: Arc::new(Mutex::new(stream))
 //         }
 //     }
+
+#[derive(Serialize, Deserialize, PartialEq)]
+pub enum InfoMsg {
+    RequestHistoryLength,
+    HistoryLength,
+    RequestHistory,
+    ConfirmReceivedHistory,
+    Nothing
+}
+#[derive(Serialize, Deserialize)]
+pub struct InfoData {
+    pub msg: InfoMsg,
+    pub number: i32
+}
+
 
 pub fn receive(history: &Arc<Mutex<ChatHistory>>, stream: &Arc<Mutex<TcpStream>>, should_close: &Arc<AtomicBool>) {
     stream.lock().unwrap().set_read_timeout(Some(Duration::from_secs(1))).unwrap();
@@ -57,57 +74,31 @@ pub fn send(texture_data: &TextureData, stream: &Arc<Mutex<TcpStream>>) {
     let serialized_data = bincode::serialize(&texture_data).unwrap();
     stream.write_all(&serialized_data).unwrap();
 }
-pub fn confirm_history(myname: &String, stream: &mut TcpStream) {
-    let bytes = myname.as_bytes();
-    let mut fixed_size_text = [0u8; 24];
-    fixed_size_text[..bytes.len()].copy_from_slice(bytes);
-    let now = SystemTime::now();
-
-    let texture_data = TextureData {
-        name: fixed_size_text,
-        data: vec![0; 200*200],
-        request_history: false,
-        request_history_length: false,
-        history_length: 0,
-        confirm_history: true,
-        timestamp: now.duration_since(UNIX_EPOCH).unwrap().as_millis()
+pub fn confirm_history(stream: &mut TcpStream) {
+    let info_data = InfoData {
+        msg: InfoMsg::ConfirmReceivedHistory,
+        number: 0
     };
-    let serialized_data = bincode::serialize(&texture_data).unwrap();
+
+    let serialized_data = bincode::serialize(&info_data).unwrap();
     stream.write_all(&serialized_data).unwrap();
 }
-pub fn request_history(myname: &String, stream: &mut TcpStream) {
-    let bytes = myname.as_bytes();
-    let mut fixed_size_text = [0u8; 24];
-    fixed_size_text[..bytes.len()].copy_from_slice(bytes);
-    let now = SystemTime::now();
-
-    let texture_data = TextureData {
-        name: fixed_size_text,
-        data: vec![0; 200*200],
-        request_history: true,
-        request_history_length: false,
-        history_length: 0,
-        confirm_history: false,
-        timestamp: now.duration_since(UNIX_EPOCH).unwrap().as_millis()
+pub fn request_history(stream: &mut TcpStream) {
+    let info_data = InfoData {
+        msg: InfoMsg::RequestHistory,
+        number: 0
     };
-    let serialized_data = bincode::serialize(&texture_data).unwrap();
+
+    let serialized_data = bincode::serialize(&info_data).unwrap();
     stream.write_all(&serialized_data).unwrap();
 }
-pub fn request_history_length(myname: &String, stream: &mut TcpStream) {
-    let bytes = myname.as_bytes();
-    let mut fixed_size_text = [0u8; 24];
-    fixed_size_text[..bytes.len()].copy_from_slice(bytes);
-    let now = SystemTime::now();
+pub fn request_history_length(stream: &mut TcpStream) {
 
-    let texture_data = TextureData {
-        name: fixed_size_text,
-        data: vec![0; 200*200],
-        request_history: false,
-        request_history_length: true,
-        history_length: 0,
-        confirm_history: false,
-        timestamp: now.duration_since(UNIX_EPOCH).unwrap().as_millis()
+    let info_data = InfoData {
+        msg: InfoMsg::RequestHistoryLength,
+        number: 0
     };
-    let serialized_data = bincode::serialize(&texture_data).unwrap();
+
+    let serialized_data = bincode::serialize(&info_data).unwrap();
     stream.write_all(&serialized_data).unwrap();
 }

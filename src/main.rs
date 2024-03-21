@@ -187,6 +187,12 @@ fn glfw_mouse_pos_to_canvas_pos(mouse: &MousePos, window: &glfw::Window) -> (u16
 
 
 fn main() {
+    let infotest = InfoData{
+        msg: InfoMsg::Nothing,
+        number: 0
+    };
+    let infosize = serialized_size(&infotest).unwrap() as usize;
+    println!("is: {infosize}");
     let mut previous_time = Instant::now();
     let mut delta_time: f32 = 0.0;
     
@@ -493,32 +499,35 @@ fn main() {
 
             let mut locked_conn = rconnection.lock().unwrap();
 
-            request_history_length(&myname, &mut locked_conn);
-
+            request_history_length(&mut locked_conn);
+            println!("Requested history length");
 
             let mut buffer = [0; crate::network::PACKET_SIZE];
 
-            match (locked_conn).read_exact(&mut buffer) {
-                Ok(_) => {
-                    let received_data: TextureData = bincode::deserialize(&buffer).unwrap();
-                    let history_size = received_data.history_length;
+            match (locked_conn).read(&mut buffer) {
+                Ok(by) => {
+                    println!("Got a response of {by} bytes");
+                    let received_data: InfoData = bincode::deserialize(&buffer[..infosize]).unwrap();
+                    let history_size = received_data.number;
+                    println!("History length is {history_size}");
                     gotHistoryLength = true;
 
 
-                    request_history(&myname, &mut locked_conn);
-
+                    request_history(&mut locked_conn);
+                    println!("Requested history, expecting {history_size} bytes");
 
                     let mut history_buffer = vec![0; history_size as usize];
 
-                    match (locked_conn).read_exact(&mut history_buffer) {
-                        Ok(_) => {
+                    match (locked_conn).read(&mut history_buffer) {
+                        Ok(bb) => {
+                            println!("Received {bb} bytes of history");
                             let history_vec: Vec<TextureData> = bincode::deserialize(&history_buffer).unwrap();
                             gotHistory = true;
                             let mut his = history.lock().unwrap();
                             his.history = history_vec;
                             his.dirty = true;
-                            
-                            confirm_history(&myname, &mut locked_conn);
+                            println!("Confirming history");
+                            confirm_history(&mut locked_conn);
                         }
                         Err(e) => {
                             println!("Failed to read from server: {}", e);
@@ -598,6 +607,7 @@ fn main() {
                 glfw::WindowEvent::FramebufferSize(wid, hei) => {
                     width = wid;
                     height = hei;
+                    history.lock().unwrap().dirty = true;
                     unsafe {
                         gl::Viewport(0, 0, wid, hei);
                     }
