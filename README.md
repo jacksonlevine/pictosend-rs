@@ -16,6 +16,6 @@ Setup:
 
 1) First, `cargo run` inside of /psrs_server to run the server. Server runs on port 6969 (TODO: Allow choosing the port.)
 
-2) Open a new terminal and go back to root directory. `cargo run` to run client. Enter any username, and `localhost:6969` to connect to your local 6969 port.
+2) Open a new terminal and go back to root directory. `cargo run` to run client. Enter any username, and `localhost:6969` to connect to your local 6969 port. To allow friends to connect, make sure you forward port 6969 to allow TCP connections, and send them your public ip (from ipchicken.com) followed by :6969
 
 3) Send messages! Camera mode puts your webcam's image in the background of your pictures. (TODO: Don't just crash when webcam isn't present. Oops!)
